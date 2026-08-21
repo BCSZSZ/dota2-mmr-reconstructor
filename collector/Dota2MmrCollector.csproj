@@ -5,10 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>Dota2MmrCollector</AssemblyName>
+    <AssemblyName>Dota2MmrReconstructor</AssemblyName>
     <RootNamespace>Dota2MmrCollector</RootNamespace>
-    <Product>Dota 2 MMR Collector</Product>
-    <Description>Download the authenticated account's raw Dota 2 GC Match History and Current Rank.</Description>
+    <Product>Dota 2 MMR Reconstructor</Product>
+    <Version>0.2.0</Version>
+    <Description>Download authenticated Dota 2 GC history and generate a reconstructed MMR curve.</Description>
     <RepositoryUrl>https://github.com/BCSZSZ/dota2-mmr-reconstructor</RepositoryUrl>
     <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
@@ -20,6 +21,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\tools\mmr-table-viewer.html"
+                      Link="Assets\mmr-table-viewer.html"
+                      LogicalName="Dota2MmrCollector.Assets.mmr-table-viewer.html" />
     <None Include="README.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="licenses\SteamKit2-LGPL-2.1.txt" CopyToOutputDirectory="PreserveNewest" />

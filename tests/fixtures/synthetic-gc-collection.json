@@ -1,0 +1,81 @@
+{
+  "SchemaVersion": 4,
+  "CapturedAtUtc": "2024-01-05T00:00:00+00:00",
+  "AccountId": 12345,
+  "RequestedRankType": "k_ERankType_RankedGlicko",
+  "CurrentRank": {
+    "Source": "request_response",
+    "RankType": { "Present": true, "Value": 6 },
+    "Result": { "Present": true, "Value": 0 },
+    "ResultName": "k_EResultSuccess",
+    "RankValue": { "Present": true, "Value": 3060 },
+    "RankData1": { "Present": true, "Value": 149 },
+    "RankData2": { "Present": true, "Value": 0 },
+    "RankData3": { "Present": true, "Value": 1704412800 }
+  },
+  "RankUpdates": [],
+  "MatchHistory": {
+    "RequestedTarget": 4,
+    "CachePath": "synthetic-cache.json",
+    "CachedRowsAtStart": 0,
+    "PagesRequested": 1,
+    "Finished": true,
+    "Error": null,
+    "Matches": [
+      {
+        "MatchId": { "Present": true, "Value": 1004 },
+        "StartTime": { "Present": true, "Value": 1704326400 },
+        "HeroId": { "Present": true, "Value": 94 },
+        "Winner": { "Present": true, "Value": true },
+        "GameMode": { "Present": true, "Value": 22 },
+        "RankChange": { "Present": true, "Value": 25 },
+        "PreviousRank": { "Present": true, "Value": 3035 },
+        "LobbyType": { "Present": true, "Value": 7 },
+        "SoloRank": { "Present": true, "Value": true },
+        "Abandon": { "Present": true, "Value": false },
+        "Duration": { "Present": true, "Value": 2400 }
+      },
+      {
+        "MatchId": { "Present": true, "Value": 1003 },
+        "StartTime": { "Present": true, "Value": 1704240000 },
+        "HeroId": { "Present": true, "Value": 1 },
+        "Winner": { "Present": true, "Value": false },
+        "GameMode": { "Present": true, "Value": 22 },
+        "RankChange": { "Present": false, "Value": 0 },
+        "PreviousRank": { "Present": false, "Value": 0 },
+        "LobbyType": { "Present": true, "Value": 7 },
+        "SoloRank": { "Present": true, "Value": true },
+        "Abandon": { "Present": true, "Value": false },
+        "Duration": { "Present": true, "Value": 2100 }
+      },
+      {
+        "MatchId": { "Present": true, "Value": 1002 },
+        "StartTime": { "Present": true, "Value": 1704153600 },
+        "HeroId": { "Present": true, "Value": 10 },
+        "Winner": { "Present": true, "Value": true },
+        "GameMode": { "Present": true, "Value": 22 },
+        "RankChange": { "Present": false, "Value": 0 },
+        "PreviousRank": { "Present": false, "Value": 0 },
+        "LobbyType": { "Present": true, "Value": 7 },
+        "SoloRank": { "Present": true, "Value": true },
+        "Abandon": { "Present": true, "Value": false },
+        "Duration": { "Present": true, "Value": 2500 }
+      },
+      {
+        "MatchId": { "Present": true, "Value": 1001 },
+        "StartTime": { "Present": true, "Value": 1704067200 },
+        "HeroId": { "Present": true, "Value": 44 },
+        "Winner": { "Present": true, "Value": true },
+        "GameMode": { "Present": true, "Value": 22 },
+        "RankChange": { "Present": true, "Value": 25 },
+        "PreviousRank": { "Present": true, "Value": 3000 },
+        "LobbyType": { "Present": true, "Value": 7 },
+        "SoloRank": { "Present": true, "Value": true },
+        "Abandon": { "Present": true, "Value": false },
+        "Duration": { "Present": true, "Value": 2300 }
+      }
+    ]
+  },
+  "CompletionError": null,
+  "Notes": ["Synthetic public test fixture."]
+}

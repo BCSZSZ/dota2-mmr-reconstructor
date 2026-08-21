@@ -1,4 +1,4 @@
-name: Release collector
+name: Release Windows app
 
 on:
   push:
@@ -22,4 +22,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/Dota2MmrCollector-win-x64.zip
+          files: dist/Dota2MmrReconstructor-win-x64.zip

@@ -855,7 +855,7 @@ def fit_low_confidence_model(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--account-id", type=int, default=136_619_313)
+    parser.add_argument("--account-id", type=int, required=True)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--gc-history-json",

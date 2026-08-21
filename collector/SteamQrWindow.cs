@@ -5,7 +5,7 @@ namespace Dota2MmrCollector;
 
 internal sealed class SteamQrWindow
 {
-    private const string WindowTitle = "Steam QR 扫码登录 - Dota 2 MMR Collector";
+    private const string WindowTitle = "Steam QR 扫码登录 - Dota 2 MMR Reconstructor";
     private readonly object gate = new();
     private readonly Action onUserClosed;
     private readonly ManualResetEventSlim ready = new(false);
@@ -86,10 +86,6 @@ internal sealed class SteamQrWindow
 
     private void RunUi()
     {
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-
         var createdForm = BuildForm();
         lock (gate)
         {

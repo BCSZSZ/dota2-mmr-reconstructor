@@ -1,5 +1,9 @@
 # Low-Confidence reconstruction model
 
+The production path is implemented in C# inside `Dota2MmrReconstructor.exe`; the Python
+implementation remains as a research/reference implementation. Both use the same v2 curve logic,
+and the C# model identifies itself as `endpoint-constrained-glicko-dd-v2-csharp`.
+
 ## Problem boundary
 
 The authenticated GC Match History exposes exact `previous_rank` and `rank_change` for many

@@ -1,6 +1,6 @@
 param(
     [string]$CollectorExe = (
-        Join-Path $PSScriptRoot "..\dist\Dota2MmrCollector-win-x64\Dota2MmrCollector.exe"
+        Join-Path $PSScriptRoot "..\dist\Dota2MmrReconstructor-win-x64\Dota2MmrReconstructor.exe"
     ),
     [int]$TimeoutSeconds = 20
 )

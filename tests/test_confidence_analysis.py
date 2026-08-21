@@ -42,7 +42,7 @@ def test_load_gc_probe_anchor_preserves_current_rank_and_uncertainty(tmp_path) -
     probe_path.write_text(
         json.dumps(
             {
-                "AccountId": 136_619_313,
+                "AccountId": 12_345,
                 "CurrentRank": {
                     "RankValue": {"Present": True, "Value": 4785},
                 },
@@ -58,7 +58,7 @@ def test_load_gc_probe_anchor_preserves_current_rank_and_uncertainty(tmp_path) -
         encoding="utf-8",
     )
 
-    anchor = load_gc_probe_anchor(probe_path, expected_account_id=136_619_313)
+    anchor = load_gc_probe_anchor(probe_path, expected_account_id=12_345)
 
     assert anchor.current_mmr == 4785
     assert anchor.base_uncertainty == 151
@@ -75,7 +75,7 @@ def test_load_gc_probe_anchor_derives_confidence_from_raw_collector(tmp_path) ->
                 "CapturedAtUtc": datetime.fromtimestamp(
                     observed_at_unix, tz=UTC
                 ).isoformat(),
-                "AccountId": 136_619_313,
+                "AccountId": 12_345,
                 "CurrentRank": {
                     "RankValue": {"Present": True, "Value": 4785},
                     "RankData1": {"Present": True, "Value": 151},
@@ -86,7 +86,7 @@ def test_load_gc_probe_anchor_derives_confidence_from_raw_collector(tmp_path) ->
         encoding="utf-8",
     )
 
-    anchor = load_gc_probe_anchor(probe_path, expected_account_id=136_619_313)
+    anchor = load_gc_probe_anchor(probe_path, expected_account_id=12_345)
 
     assert anchor.current_mmr == 4785
     assert anchor.base_uncertainty == 151
@@ -113,7 +113,7 @@ def test_gc_history_uses_exact_rank_change_for_an_abandon_without_winner(
     history_path.write_text(
         json.dumps(
             {
-                "AccountId": 341_531_496,
+                "AccountId": 67_890,
                 "MatchHistory": {
                     "Finished": True,
                     "Error": None,
@@ -140,7 +140,7 @@ def test_gc_history_uses_exact_rank_change_for_an_abandon_without_winner(
 
     timeline = load_gc_match_history_timeline(
         history_path,
-        expected_account_id=341_531_496,
+        expected_account_id=67_890,
     )
 
     assert len(timeline) == 1

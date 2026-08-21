@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 - 2026-08-21
+
+- Port the production low-Confidence reconstruction path from Python to C#.
+- Add a double-click GUI for Steam ID, history target and output directory.
+- Generate CSV, JSON, SVG and a self-contained interactive HTML after collection.
+- Keep `--raw-only` and add offline `--reconstruct-existing` mode.
+- Retain the Python implementation as a reference and research workflow.
+
 ## 0.1.0 - 2026-08-21
 
 - Add the QR-authenticated, resumable raw GC Match History and Current Rank collector.

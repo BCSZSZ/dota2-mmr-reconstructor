@@ -43,11 +43,15 @@ internal static class Program
     private static bool gcReady;
     private static volatile bool isRunning;
     private static bool outputWritten;
+    private static bool suppressOutput;
     private static bool disconnectRequested;
     private static bool reconnectRequested;
     private static int reconnectAttempts;
+    private static bool cacheLoaded;
     private static string? loginAccountName;
     private static string? loginRefreshToken;
+    private static string? reconstructionError;
+    private static ReconstructionOutput? reconstructionOutput;
     private static DateTime rankRequestedAtUtc;
     private static DateTime historyRequestedAtUtc;
 
@@ -55,7 +59,10 @@ internal static class Program
     private static int Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
-        if (!TryParseArguments(args, out options, out var showHelp))
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        if (!TryParseArguments(args, out options, out var showHelp, out var cancelled))
         {
             if (showHelp)
             {
@@ -63,38 +70,80 @@ internal static class Program
                 return 0;
             }
 
+            if (cancelled)
+            {
+                return 0;
+            }
+
             PrintUsage();
             return 1;
         }
 
-        var exitCode = Run();
+        var exitCode = options.ExistingCollectionPath is null
+            ? Run()
+            : RunExistingReconstruction();
         if (options.Interactive)
         {
-            Console.WriteLine();
-            Console.Write("按回车关闭窗口……");
-            Console.ReadLine();
+            CompletionDialog.Show(
+                exitCode == 0,
+                reconstructionOutput?.OutputDirectory
+                    ?? Path.GetDirectoryName(options.OutputPath)
+                    ?? options.OutputRoot
+                    ?? AppContext.BaseDirectory,
+                reconstructionError,
+                options.GenerateReconstruction
+                    && (options.ExistingCollectionPath is not null || options.HistoryMatches > 0));
         }
 
         return exitCode;
     }
 
-    private static int Run()
+    private static int RunExistingReconstruction()
     {
-        Console.WriteLine("Dota 2 MMR Collector");
-        Console.WriteLine($"目标历史行数：{options.HistoryMatches:N0}");
-        Console.WriteLine($"原始输出：{options.OutputPath}");
-        Console.WriteLine($"断点缓存：{options.HistoryCachePath}");
-        Console.WriteLine();
-
-        if (!LoadMatchHistoryCache())
+        try
         {
+            var inputPath = Path.GetFullPath(options.ExistingCollectionPath!);
+            var outputDirectory = options.OutputRoot is not null
+                ? Path.GetFullPath(options.OutputRoot)
+                : Path.Combine(Path.GetDirectoryName(inputPath)!, "mmr-reconstruction");
+            reconstructionOutput = MmrReconstructor.Run(
+                inputPath,
+                outputDirectory,
+                options.ExpectedAccountId);
+            Console.WriteLine(
+                $"C# 曲线生成完成：{reconstructionOutput.Matches:N0} 场 " +
+                $"({reconstructionOutput.ActualMatches:N0} 真实 / " +
+                $"{reconstructionOutput.ModeledMatches:N0} 拟合)。");
+            Console.WriteLine($"交互 HTML：{reconstructionOutput.HtmlPath}");
+            return 0;
+        }
+        catch (Exception exception) when (
+            exception is IOException or JsonException or InvalidDataException
+            or UnauthorizedAccessException or InvalidOperationException)
+        {
+            reconstructionError = $"C# 曲线生成失败：{exception.Message}";
+            Console.Error.WriteLine(reconstructionError);
             return 1;
         }
+    }
+
+    private static int Run()
+    {
+        Console.WriteLine("Dota 2 MMR Reconstructor");
+        Console.WriteLine($"目标历史行数：{options.HistoryMatches:N0}");
+        Console.WriteLine(options.ResolvePathsAfterLogin
+            ? $"输出根目录：{options.OutputRoot}（扫码后按账号创建子目录）"
+            : $"原始输出：{options.OutputPath}");
+        Console.WriteLine(options.GenerateReconstruction
+            ? "下载后：使用 C# 生成完整 CSV/JSON/SVG/HTML。"
+            : "下载后：仅保留原始 GC 数据。 ");
+        Console.WriteLine();
 
         if (Process.GetProcessesByName("dota2").Length > 0)
         {
-            Console.Error.WriteLine(
-                "Dota 2 正在运行。请先退出游戏；Valve 每个账号只允许一个 Dota GC 会话。");
+            reconstructionError =
+                "Dota 2 正在运行。请先退出游戏；Valve 每个账号只允许一个 Dota GC 会话。";
+            Console.Error.WriteLine(reconstructionError);
             return 2;
         }
 
@@ -133,27 +182,64 @@ internal static class Program
             CheckResponseTimeouts();
         }
 
-        if (!outputWritten && accountId != 0)
+        if (!outputWritten && !suppressOutput && accountId != 0)
         {
             WriteOutput("connection_ended_before_collection_completed");
         }
 
         qrWindow.Close();
-        return outputWritten && matchHistoryError is null && currentRank is not null ? 0 : 1;
+        return outputWritten
+            && matchHistoryError is null
+            && currentRank is not null
+            && (!options.GenerateReconstruction || reconstructionError is null)
+                ? 0
+                : 1;
     }
 
     private static bool TryParseArguments(
         string[] args,
         out CollectorOptions parsedOptions,
-        out bool showHelp)
+        out bool showHelp,
+        out bool cancelled)
     {
         showHelp = false;
+        cancelled = false;
         var interactive = args.Length == 0;
-        var defaultDirectory = interactive ? AppContext.BaseDirectory : Environment.CurrentDirectory;
+        if (interactive)
+        {
+            var selection = CollectorSetupWindow.AskUser();
+            if (selection is null)
+            {
+                parsedOptions = default!;
+                cancelled = true;
+                return false;
+            }
+
+            var placeholderDirectory = Path.Combine(selection.OutputRoot, "_account_pending");
+            parsedOptions = new CollectorOptions(
+                Path.Combine(placeholderDirectory, "gc-collection.json"),
+                selection.ExpectedAccountId,
+                selection.HistoryMatches,
+                Path.Combine(placeholderDirectory, "gc-match-history-cache.json"),
+                true,
+                selection.GenerateReconstruction,
+                selection.OutputRoot,
+                true,
+                null);
+            return true;
+        }
+
+        var defaultDirectory = Environment.CurrentDirectory;
         var outputPath = Path.GetFullPath(Path.Combine(defaultDirectory, "gc-collection.json"));
         var cachePath = Path.GetFullPath(Path.Combine(defaultDirectory, "gc-match-history-cache.json"));
         uint? expectedAccountId = null;
         var historyMatches = DefaultHistoryMatches;
+        var generateReconstruction = true;
+        var explicitOutputPath = false;
+        var explicitCachePath = false;
+        string? outputRoot = null;
+        var resolvePathsAfterLogin = false;
+        string? existingCollectionPath = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -174,6 +260,7 @@ internal static class Program
                 }
 
                 outputPath = Path.GetFullPath(value);
+                explicitOutputPath = true;
                 continue;
             }
 
@@ -186,21 +273,29 @@ internal static class Program
                 }
 
                 cachePath = Path.GetFullPath(value);
+                explicitCachePath = true;
                 continue;
             }
 
             if (argument == "--account-id")
             {
-                if (!TryReadValue(args, ref index, argument, out var value)
-                    || !uint.TryParse(value, out var parsedAccountId)
-                    || parsedAccountId == 0)
+                if (!TryReadValue(args, ref index, argument, out var value))
                 {
-                    Console.Error.WriteLine("--account-id 需要有效的 Steam ID32。");
                     parsedOptions = default!;
                     return false;
                 }
 
-                expectedAccountId = parsedAccountId;
+                try
+                {
+                    expectedAccountId = CollectorSetupWindow.ParseAccountId(value);
+                }
+                catch (FormatException exception)
+                {
+                    Console.Error.WriteLine($"--account-id：{exception.Message}");
+                    parsedOptions = default!;
+                    return false;
+                }
+
                 continue;
             }
 
@@ -218,7 +313,45 @@ internal static class Program
                 continue;
             }
 
+            if (argument == "--output-dir")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value))
+                {
+                    parsedOptions = default!;
+                    return false;
+                }
+                outputRoot = Path.GetFullPath(value);
+                resolvePathsAfterLogin = existingCollectionPath is null;
+                continue;
+            }
+
+            if (argument == "--raw-only")
+            {
+                generateReconstruction = false;
+                continue;
+            }
+
+            if (argument == "--reconstruct-existing")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value))
+                {
+                    parsedOptions = default!;
+                    return false;
+                }
+                existingCollectionPath = Path.GetFullPath(value);
+                generateReconstruction = true;
+                resolvePathsAfterLogin = false;
+                continue;
+            }
+
             Console.Error.WriteLine($"未知参数：{argument}");
+            parsedOptions = default!;
+            return false;
+        }
+
+        if (resolvePathsAfterLogin && (explicitOutputPath || explicitCachePath))
+        {
+            Console.Error.WriteLine("--output-dir 不能与 --output 或 --history-cache 同时使用。");
             parsedOptions = default!;
             return false;
         }
@@ -228,7 +361,11 @@ internal static class Program
             expectedAccountId,
             historyMatches,
             cachePath,
-            interactive);
+            interactive,
+            generateReconstruction,
+            outputRoot,
+            resolvePathsAfterLogin,
+            existingCollectionPath);
         return true;
     }
 
@@ -252,10 +389,15 @@ internal static class Program
     private static void PrintUsage()
     {
         Console.WriteLine(
-            "Dota2MmrCollector [--account-id <ID32>] [--history-matches <count>] " +
-            "[--output <json-path>] [--history-cache <json-path>]");
-        Console.WriteLine("双击运行时默认下载 5,000 行，并把输出写在 EXE 所在目录。");
+            "Dota2MmrReconstructor [--account-id <ID32|SteamID64>] " +
+            "[--history-matches <count>] " +
+            "[--output-dir <directory>] [--raw-only]");
+        Console.WriteLine(
+            "Dota2MmrReconstructor --reconstruct-existing <gc-collection.json> " +
+            "[--output-dir <directory>]");
+        Console.WriteLine("双击运行会显示设置窗口；默认下载 5,000 行并生成完整曲线和 HTML。");
         Console.WriteLine("history-matches 是断点缓存最终保留的目标总行数；重复运行会先复用缓存。");
+        Console.WriteLine("account-id 同时接受 ID32 和个人账号 SteamID64，也可以在 GUI 中留空自动识别。");
     }
 
     private static bool LoadMatchHistoryCache()
@@ -382,7 +524,8 @@ internal static class Program
         catch (Exception exception)
         {
             qrWindow?.Close();
-            Console.Error.WriteLine($"Steam 二维码认证失败：{exception.GetType().Name}");
+            reconstructionError = $"Steam 二维码认证失败：{exception.GetType().Name}";
+            Console.Error.WriteLine(reconstructionError);
             isRunning = false;
             steamClient.Disconnect();
         }
@@ -401,7 +544,8 @@ internal static class Program
 
     private static void OnQrWindowClosed()
     {
-        Console.Error.WriteLine("二维码窗口已关闭，取消本次登录。");
+        reconstructionError = "二维码窗口已关闭，本次登录已取消。";
+        Console.Error.WriteLine(reconstructionError);
         isRunning = false;
         steamClient?.Disconnect();
     }
@@ -427,7 +571,8 @@ internal static class Program
                 return;
             }
 
-            Console.Error.WriteLine($"Steam 登录失败：{callback.Result} / {callback.ExtendedResult}");
+            reconstructionError = $"Steam 登录失败：{callback.Result} / {callback.ExtendedResult}";
+            Console.Error.WriteLine(reconstructionError);
             ClearLoginToken();
             isRunning = false;
             steamClient.Disconnect();
@@ -437,7 +582,8 @@ internal static class Program
         var steamId = steamUser.SteamID;
         if (steamId is null)
         {
-            Console.Error.WriteLine("Steam 登录成功，但响应中没有 SteamID。");
+            reconstructionError = "Steam 登录成功，但响应中没有 SteamID。";
+            Console.Error.WriteLine(reconstructionError);
             isRunning = false;
             steamClient.Disconnect();
             return;
@@ -446,17 +592,46 @@ internal static class Program
         accountId = steamId.AccountID;
         if (options.ExpectedAccountId is not null && accountId != options.ExpectedAccountId)
         {
-            Console.Error.WriteLine(
-                $"扫码账号 ID32 {accountId} 与请求账号 {options.ExpectedAccountId} 不一致；不会写入输出。");
+            reconstructionError =
+                $"扫码账号 ID32 {accountId} 与请求账号 {options.ExpectedAccountId} 不一致；不会写入输出。";
+            Console.Error.WriteLine(reconstructionError);
+            suppressOutput = true;
             isRunning = false;
             steamClient.Disconnect();
             return;
         }
 
+        if (options.ResolvePathsAfterLogin)
+        {
+            var accountDirectory = Path.Combine(options.OutputRoot!, accountId.ToString());
+            options = options with
+            {
+                OutputPath = Path.Combine(accountDirectory, "gc-collection.json"),
+                HistoryCachePath = Path.Combine(accountDirectory, "gc-match-history-cache.json"),
+            };
+        }
+
+        if (!cacheLoaded)
+        {
+            Console.WriteLine($"原始输出：{options.OutputPath}");
+            Console.WriteLine($"断点缓存：{options.HistoryCachePath}");
+            if (!LoadMatchHistoryCache())
+            {
+                reconstructionError = "无法载入现有 Match History 缓存。";
+                suppressOutput = true;
+                isRunning = false;
+                steamClient.Disconnect();
+                return;
+            }
+            cacheLoaded = true;
+        }
+
         if (cachedAccountId != 0 && cachedAccountId != accountId)
         {
-            Console.Error.WriteLine(
-                $"缓存属于账号 {cachedAccountId}，扫码账号是 {accountId}；不会写入输出。");
+            reconstructionError =
+                $"缓存属于账号 {cachedAccountId}，扫码账号是 {accountId}；不会写入输出。";
+            Console.Error.WriteLine(reconstructionError);
+            suppressOutput = true;
             isRunning = false;
             steamClient.Disconnect();
             return;
@@ -491,7 +666,8 @@ internal static class Program
 
         if (!disconnectRequested)
         {
-            Console.Error.WriteLine("原始数据下载完成前与 Steam 断开连接。");
+            reconstructionError ??= "原始数据下载完成前与 Steam 断开连接。";
+            Console.Error.WriteLine(reconstructionError);
         }
 
         isRunning = false;
@@ -777,7 +953,7 @@ internal static class Program
 
     private static void WriteOutput(string? completionError)
     {
-        if (outputWritten || accountId == 0)
+        if (outputWritten || suppressOutput || accountId == 0)
         {
             return;
         }
@@ -801,7 +977,7 @@ internal static class Program
             history,
             completionError,
             [
-                "This file contains raw authenticated-account GC data; no low-Confidence MMR reconstruction was run by the collector.",
+                "This file contains raw authenticated-account GC data. Any reconstruction output is written separately and never replaces this file.",
                 "Present=false is different from a protobuf field explicitly returned with value 0.",
                 "rank_data1/rank_data2/rank_data3 are preserved without interpreting them in the collector.",
                 "Match History preserves Winner, lobby type, rank values, and protobuf presence for calibrated and uncalibrated matches.",
@@ -810,8 +986,39 @@ internal static class Program
         EnsureParentDirectory(options.OutputPath);
         WriteJsonAtomically(options.OutputPath, output);
         outputWritten = true;
-        ClearLoginToken();
         Console.WriteLine($"原始 GC 数据已写入 {options.OutputPath}");
+
+        if (options.GenerateReconstruction
+            && options.HistoryMatches > 0
+            && completionError is null
+            && matchHistoryError is null)
+        {
+            try
+            {
+                var accountDirectory = Path.GetDirectoryName(options.OutputPath)
+                    ?? throw new InvalidOperationException("原始输出路径没有父目录。");
+                var reconstructionDirectory = Path.Combine(accountDirectory, "mmr-reconstruction");
+                reconstructionOutput = MmrReconstructor.Run(
+                    options.OutputPath,
+                    reconstructionDirectory,
+                    accountId);
+                Console.WriteLine(
+                    $"C# 曲线生成完成：{reconstructionOutput.Matches:N0} 场 " +
+                    $"({reconstructionOutput.ActualMatches:N0} 真实 / " +
+                    $"{reconstructionOutput.ModeledMatches:N0} 拟合)。");
+                Console.WriteLine($"交互 HTML：{reconstructionOutput.HtmlPath}");
+            }
+            catch (Exception exception) when (
+                exception is IOException or JsonException or InvalidDataException
+                or UnauthorizedAccessException or InvalidOperationException)
+            {
+                reconstructionError =
+                    $"原始 GC 数据已经安全保存，但 C# 曲线生成失败：{exception.Message}";
+                Console.Error.WriteLine(reconstructionError);
+            }
+        }
+
+        ClearLoginToken();
     }
 
     private static void EnsureParentDirectory(string path)
@@ -851,7 +1058,11 @@ internal sealed record CollectorOptions(
     uint? ExpectedAccountId,
     int HistoryMatches,
     string HistoryCachePath,
-    bool Interactive);
+    bool Interactive,
+    bool GenerateReconstruction,
+    string? OutputRoot,
+    bool ResolvePathsAfterLogin,
+    string? ExistingCollectionPath);
 
 internal sealed record FieldObservation(bool Present, object Value);
 

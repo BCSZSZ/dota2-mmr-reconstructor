@@ -67,6 +67,7 @@ def collector_command(
         str(paths.history_cache_json),
         "--output",
         str(paths.probe_json),
+        "--raw-only",
     ]
 
 
@@ -184,8 +185,8 @@ def build_parser() -> argparse.ArgumentParser:
             "DOTA2_GC_COLLECTOR",
             root
             / "dist"
-            / "Dota2MmrCollector-win-x64"
-            / "Dota2MmrCollector.exe",
+            / "Dota2MmrReconstructor-win-x64"
+            / "Dota2MmrReconstructor.exe",
         )
     )
     parser = argparse.ArgumentParser(

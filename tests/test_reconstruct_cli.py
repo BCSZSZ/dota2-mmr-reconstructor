@@ -15,17 +15,18 @@ def test_collector_command_requests_cached_history_and_account_validation(tmp_pa
     paths = build_paths(tmp_path, 123)
 
     command = collector_command(
-        collector=Path("Dota2MmrCollector.exe"),
+        collector=Path("Dota2MmrReconstructor.exe"),
         account_id=123,
         history_matches=5_000,
         paths=paths,
     )
 
-    assert command[:3] == ["Dota2MmrCollector.exe", "--account-id", "123"]
+    assert command[:3] == ["Dota2MmrReconstructor.exe", "--account-id", "123"]
     assert command[command.index("--history-matches") + 1] == "5000"
     assert command[command.index("--history-cache") + 1] == str(
         paths.history_cache_json
     )
+    assert "--raw-only" in command
     assert "--skip-match-details" not in command
     assert "--skip-battle-report" not in command
 
