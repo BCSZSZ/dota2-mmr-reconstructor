@@ -79,9 +79,18 @@ internal static class Program
             return 1;
         }
 
-        var exitCode = options.ExistingCollectionPath is null
-            ? Run()
-            : RunExistingReconstruction();
+        int exitCode;
+        try
+        {
+            exitCode = options.ExistingCollectionPath is null
+                ? Run()
+                : RunExistingReconstruction();
+        }
+        finally
+        {
+            ClearEphemeralCredentials();
+            ClearLoginToken();
+        }
         if (options.Interactive)
         {
             CompletionDialog.Show(
@@ -133,7 +142,7 @@ internal static class Program
         Console.WriteLine("Dota 2 MMR Reconstructor");
         Console.WriteLine($"目标历史行数：{options.HistoryMatches:N0}");
         Console.WriteLine(options.ResolvePathsAfterLogin
-            ? $"输出根目录：{options.OutputRoot}（扫码后按账号创建子目录）"
+            ? $"输出根目录：{options.OutputRoot}（登录后按账号创建子目录）"
             : $"原始输出：{options.OutputPath}");
         Console.WriteLine(options.GenerateReconstruction
             ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/SVG/PNG/HTML。"
@@ -172,10 +181,14 @@ internal static class Program
         manager.Subscribe<SteamUser.LoggedOnCallback>(callback => OnLoggedOn(callback, cellIdPath));
         manager.Subscribe<SteamUser.LoggedOffCallback>(OnLoggedOff);
         manager.Subscribe<SteamGameCoordinator.MessageCallback>(OnGcMessage);
-        qrWindow = new SteamQrWindow(OnQrWindowClosed);
+        qrWindow = options.Login.Mode == SteamLoginMode.QrCode
+            ? new SteamQrWindow(OnQrWindowClosed)
+            : null;
 
         isRunning = true;
-        Console.WriteLine("正在连接 Steam；二维码会在独立窗口显示，不会保存密码或登录令牌。");
+        Console.WriteLine(options.Login.Mode == SteamLoginMode.Credentials
+            ? "正在连接 Steam；将使用一次性用户名/密码登录，随后弹出 Steam Guard 验证码窗口。"
+            : "正在连接 Steam；二维码会在独立窗口显示，不会保存密码或登录令牌。");
         steamClient.Connect();
         while (isRunning)
         {
@@ -188,7 +201,7 @@ internal static class Program
             WriteOutput("connection_ended_before_collection_completed");
         }
 
-        qrWindow.Close();
+        qrWindow?.Close();
         return outputWritten
             && matchHistoryError is null
             && currentRank is not null
@@ -226,7 +239,8 @@ internal static class Program
                 selection.GenerateReconstruction,
                 selection.OutputRoot,
                 true,
-                null);
+                null,
+                selection.Login);
             return true;
         }
 
@@ -366,7 +380,8 @@ internal static class Program
             generateReconstruction,
             outputRoot,
             resolvePathsAfterLogin,
-            existingCollectionPath);
+            existingCollectionPath,
+            SteamLoginSelection.QrCode);
         return true;
     }
 
@@ -399,6 +414,7 @@ internal static class Program
         Console.WriteLine("双击运行会显示设置窗口；默认下载 5,000 行并生成完整曲线和 HTML。");
         Console.WriteLine("history-matches 是断点缓存最终保留的目标总行数；重复运行会先复用缓存。");
         Console.WriteLine("account-id 同时接受 ID32 和个人账号 SteamID64，也可以在 GUI 中留空自动识别。");
+        Console.WriteLine("用户名/密码/Steam Guard 验证码登录仅在 GUI 提供，敏感信息不会放入命令行。");
     }
 
     private static bool LoadMatchHistoryCache()
@@ -502,34 +518,124 @@ internal static class Program
                 return;
             }
 
+            if (options.Login.Mode == SteamLoginMode.Credentials)
+            {
+                await AuthenticateWithCredentialsAsync();
+                return;
+            }
+
             var authSession = await steamClient.Authentication.BeginAuthSessionViaQRAsync(
                 new AuthSessionDetails { IsPersistentSession = false });
             authSession.ChallengeURLChanged = () => DrawQrCode(authSession);
             DrawQrCode(authSession);
 
             var pollResponse = await authSession.PollingWaitForResultAsync();
-            qrWindow?.Close();
-            Console.WriteLine($"Steam 已批准账号 '{pollResponse.AccountName}' 的本次登录。");
-            loginAccountName = pollResponse.AccountName;
-            loginRefreshToken = pollResponse.RefreshToken;
-            steamUser.LogOn(new SteamUser.LogOnDetails
-            {
-                Username = loginAccountName,
-                AccessToken = loginRefreshToken,
-            });
+            CompleteAuthentication(pollResponse, "Steam 已批准本次二维码登录。");
         }
         catch (TaskCanceledException) when (loginRefreshToken is not null)
         {
             Console.WriteLine("Steam CM 切换取消了旧二维码轮询；继续使用已批准的内存会话。");
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
             qrWindow?.Close();
-            reconstructionError = $"Steam 二维码认证失败：{exception.GetType().Name}";
+            reconstructionError = "Steam 登录已取消。";
             Console.Error.WriteLine(reconstructionError);
+            ClearEphemeralCredentials();
             isRunning = false;
             steamClient.Disconnect();
         }
+        catch (AuthenticationException exception)
+        {
+            qrWindow?.Close();
+            reconstructionError = CredentialAuthenticationError(exception);
+            Console.Error.WriteLine(reconstructionError);
+            ClearEphemeralCredentials();
+            isRunning = false;
+            steamClient.Disconnect();
+        }
+        catch (Exception exception)
+        {
+            qrWindow?.Close();
+            reconstructionError = $"Steam 认证失败：{exception.GetType().Name}";
+            Console.Error.WriteLine(reconstructionError);
+            ClearEphemeralCredentials();
+            isRunning = false;
+            steamClient.Disconnect();
+        }
+    }
+
+    private static async Task AuthenticateWithCredentialsAsync()
+    {
+        if (steamClient is null || steamUser is null)
+        {
+            return;
+        }
+
+        var credentials = options.Login.Credentials
+            ?? throw new InvalidOperationException("凭据登录已选择，但用户名或密码已不可用。");
+        if (credentials.IsCleared)
+        {
+            throw new InvalidOperationException("一次性用户名和密码已经清除，请重新启动登录。");
+        }
+
+        Console.WriteLine("正在提交加密后的 Steam 登录凭据……");
+        var details = new AuthSessionDetails
+        {
+            Username = credentials.Username,
+            Password = credentials.Password,
+            IsPersistentSession = false,
+            Authenticator = new InteractiveSteamAuthenticator(),
+        };
+
+        try
+        {
+            var authSession = await steamClient.Authentication
+                .BeginAuthSessionViaCredentialsAsync(details);
+            details.Password = string.Empty;
+            var pollResponse = await authSession.PollingWaitForResultAsync();
+            CompleteAuthentication(pollResponse, "Steam 用户名/密码和验证码认证成功。");
+        }
+        finally
+        {
+            details.Username = string.Empty;
+            details.Password = string.Empty;
+        }
+    }
+
+    private static void CompleteAuthentication(AuthPollResult pollResponse, string message)
+    {
+        if (steamUser is null)
+        {
+            return;
+        }
+
+        qrWindow?.Close();
+        loginAccountName = pollResponse.AccountName;
+        loginRefreshToken = pollResponse.RefreshToken;
+        ClearEphemeralCredentials();
+        Console.WriteLine(message);
+        steamUser.LogOn(new SteamUser.LogOnDetails
+        {
+            Username = loginAccountName,
+            AccessToken = loginRefreshToken,
+        });
+    }
+
+    private static string CredentialAuthenticationError(AuthenticationException exception)
+    {
+        if (options.Login.Mode != SteamLoginMode.Credentials)
+        {
+            return $"Steam 二维码认证失败：{exception.Result}";
+        }
+
+        return exception.Result switch
+        {
+            EResult.InvalidPassword => "Steam 登录失败：用户名或密码不正确。",
+            EResult.TwoFactorCodeMismatch => "Steam 登录失败：Steam Guard 验证码不正确。",
+            EResult.RateLimitExceeded => "Steam 登录尝试过多，请稍后再试。",
+            _ => $"Steam 用户名/密码认证失败：{exception.Result}。",
+        };
     }
 
     private static void DrawQrCode(QrAuthSession authSession)
@@ -594,7 +700,7 @@ internal static class Program
         if (options.ExpectedAccountId is not null && accountId != options.ExpectedAccountId)
         {
             reconstructionError =
-                $"扫码账号 ID32 {accountId} 与请求账号 {options.ExpectedAccountId} 不一致；不会写入输出。";
+                $"登录账号 ID32 {accountId} 与请求账号 {options.ExpectedAccountId} 不一致；不会写入输出。";
             Console.Error.WriteLine(reconstructionError);
             suppressOutput = true;
             isRunning = false;
@@ -630,7 +736,7 @@ internal static class Program
         if (cachedAccountId != 0 && cachedAccountId != accountId)
         {
             reconstructionError =
-                $"缓存属于账号 {cachedAccountId}，扫码账号是 {accountId}；不会写入输出。";
+                $"缓存属于账号 {cachedAccountId}，登录账号是 {accountId}；不会写入输出。";
             Console.Error.WriteLine(reconstructionError);
             suppressOutput = true;
             isRunning = false;
@@ -1051,6 +1157,9 @@ internal static class Program
         loginRefreshToken = null;
     }
 
+    private static void ClearEphemeralCredentials() =>
+        options.Login?.Credentials?.Clear();
+
     private static FieldObservation Observe(bool present, object value) =>
         new(present, value);
 }
@@ -1064,7 +1173,8 @@ internal sealed record CollectorOptions(
     bool GenerateReconstruction,
     string? OutputRoot,
     bool ResolvePathsAfterLogin,
-    string? ExistingCollectionPath);
+    string? ExistingCollectionPath,
+    SteamLoginSelection Login);
 
 internal sealed record FieldObservation(bool Present, object Value);
 

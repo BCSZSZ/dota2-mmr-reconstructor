@@ -16,6 +16,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Verify credential and reconstruction flows
+        shell: pwsh
+        run: |
+          dotnet build .\collector\Dota2MmrCollector.csproj --configuration Release
+          .\scripts\test_credential_login_security.ps1
+          .\scripts\test_csharp_reconstruction.ps1
       - name: Build collector archive
         shell: pwsh
         run: .\scripts\build_collector.ps1

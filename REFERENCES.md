@@ -21,7 +21,11 @@ ShowMMR reference revision used during development:
 
 - [SteamKit2](https://github.com/SteamRE/SteamKit) provides the Steam and Game Coordinator
   client library. The collector pins NuGet package `SteamKit2` 3.0.0, licensed under
-  LGPL-2.1-only.
+  LGPL-2.1-only. The optional credentials flow uses that fixed version's
+  [`BeginAuthSessionViaCredentialsAsync`](https://github.com/SteamRE/SteamKit/blob/3.0.0/SteamKit2/SteamKit2/Steam/Authentication/SteamAuthentication.cs),
+  which encrypts the password with Steam's RSA public key before sending it, and its
+  [`IAuthenticator` / auth-session flow](https://github.com/SteamRE/SteamKit/blob/3.0.0/SteamKit2/SteamKit2/Steam/Authentication/AuthSession.cs)
+  to submit a user-entered Steam Guard code.
 - [SteamDatabase/GameTracking-Dota2](https://github.com/SteamDatabase/GameTracking-Dota2)
   publishes tracked Dota 2 protobuf schemas used to identify Rank and Match History fields.
 - [Valve: The New Frontiers Update](https://www.dota2.com/newfrontiers) describes the 2023
