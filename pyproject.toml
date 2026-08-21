@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dota2-mmr"
+version = "0.1.0"
+description = "Collect and reconstruct Dota 2 MMR history across low Rank Confidence gaps."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["dota2", "mmr", "glicko", "steam", "game-coordinator"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "tzdata>=2025.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/BCSZSZ/dota2-mmr-reconstructor"
+Repository = "https://github.com/BCSZSZ/dota2-mmr-reconstructor"
+Issues = "https://github.com/BCSZSZ/dota2-mmr-reconstructor/issues"
+
+[project.scripts]
+dota2-mmr = "dota2_mmr.cli:main"
+dota2-mmr-reconstruct = "dota2_mmr.reconstruct_cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dota2_mmr"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,1209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dota 2 MMR 数据表格</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f6f8fa, #0d1117);
+      --surface: light-dark(#ffffff, #161b22);
+      --surface-alt: light-dark(#f6f8fa, #21262d);
+      --text: light-dark(#1f2328, #e6edf3);
+      --muted: light-dark(#59636e, #8b949e);
+      --border: light-dark(#d0d7de, #30363d);
+      --accent: light-dark(#0969da, #58a6ff);
+      --accent-soft: light-dark(#ddf4ff, #0d3058);
+      --positive: light-dark(#1a7f37, #3fb950);
+      --negative: light-dark(#cf222e, #f85149);
+      --warning: light-dark(#9a6700, #d29922);
+      --chart-actual: light-dark(#0969da, #58a6ff);
+      --chart-modeled: light-dark(#bc6b00, #f2a65a);
+      --chart-guide: light-dark(#59636e, #8b949e);
+      --row-height: 34px;
+      --header-height: 42px;
+      --table-font-size: 13px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    button, select, input[type="search"] {
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    button { padding: 7px 11px; cursor: pointer; }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    button.primary { background: var(--accent); color: light-dark(#fff, #08111d); border-color: var(--accent); }
+    input[type="search"], select { padding: 7px 9px; min-height: 36px; }
+    input[type="range"] { accent-color: var(--accent); }
+
+    .app { width: 100%; padding: 18px; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .actions, .filters, .view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .actions { justify-content: flex-end; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+    .field input[type="search"] { width: min(270px, 58vw); }
+    .scale-value { min-width: 42px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .drop-zone {
+      margin-top: 12px;
+      padding: 11px 14px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      transition: border-color .15s, background .15s;
+    }
+    .drop-zone.dragging { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+    .dataset-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .dataset-name { color: var(--text); font-weight: 600; }
+    .dataset-meta { font-size: 13px; }
+    .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+
+    details.columns { position: relative; }
+    details.columns > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 7px 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+    }
+    details.columns > summary::-webkit-details-marker { display: none; }
+    .column-picker {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 30;
+      width: min(330px, 88vw);
+      max-height: 360px;
+      overflow: auto;
+      padding: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 10px 30px light-dark(#1f232820, #0008);
+    }
+    .column-picker label { display: flex; align-items: center; gap: 8px; padding: 5px 3px; font-size: 13px; }
+
+    .chart-section {
+      margin-top: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--border);
+    }
+    .chart-title { margin: 0; font-size: 15px; font-weight: 650; }
+    .chart-legend, .chart-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .series-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; }
+    .series-toggle input { margin: 0; }
+    .series-swatch { width: 18px; height: 3px; border-radius: 2px; background: var(--chart-actual); }
+    .series-swatch.modeled { background: var(--chart-modeled); }
+    .chart-viewport {
+      position: relative;
+      width: 100%;
+      height: 440px;
+      min-height: 280px;
+      max-height: 82vh;
+      resize: vertical;
+      overflow: hidden;
+      touch-action: none;
+      cursor: crosshair;
+      background: var(--surface);
+    }
+    .chart-viewport.dragging { cursor: grabbing; user-select: none; }
+    .chart-svg { display: block; width: 100%; height: 100%; }
+    .chart-svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+    .chart-svg .axis-title { fill: var(--text); font-size: 12px; }
+    .chart-svg .grid-line { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .chart-svg .plot-frame { fill: none; stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .chart-svg .series-actual { fill: none; stroke: var(--chart-actual); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+    .chart-svg .series-modeled { fill: none; stroke: var(--chart-modeled); stroke-width: 1.8; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+    .chart-svg .point-actual { fill: var(--chart-actual); }
+    .chart-svg .point-modeled { fill: var(--chart-modeled); }
+    .chart-svg .hover-guide { stroke: var(--chart-guide); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+    .chart-svg .hover-marker { fill: var(--surface); stroke-width: 2; pointer-events: none; }
+    .chart-svg .interaction-layer { fill: transparent; cursor: inherit; }
+    .chart-tooltip {
+      position: absolute;
+      z-index: 5;
+      max-width: min(330px, calc(100% - 16px));
+      padding: 8px 10px;
+      color: var(--text);
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px light-dark(#1f232820, #0008);
+      font-size: 12px;
+      line-height: 1.5;
+      pointer-events: none;
+    }
+    .chart-tooltip strong { display: block; margin-bottom: 2px; font-size: 13px; }
+    .chart-meta { padding: 7px 11px; color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; }
+    .chart-empty { position: absolute; inset: 0; display: grid; place-content: center; color: var(--muted); pointer-events: none; }
+    .chart-section:fullscreen { width: 100vw; height: 100vh; background: var(--surface); }
+    .chart-section:fullscreen .chart-viewport { height: calc(100vh - 93px); max-height: none; resize: none; }
+
+    .grid-shell {
+      position: relative;
+      width: 100%;
+      height: 68vh;
+      min-width: min(420px, 100%);
+      min-height: 260px;
+      max-width: 100%;
+      margin-top: 12px;
+      overflow: auto;
+      resize: both;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      scrollbar-color: var(--border) var(--surface-alt);
+    }
+    .grid-shell:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+    .grid-canvas { position: relative; min-width: 100%; }
+    .grid-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: grid;
+      height: var(--header-height);
+      background: var(--surface-alt);
+      border-bottom: 1px solid var(--border);
+      font-size: var(--table-font-size);
+      user-select: none;
+    }
+    .header-cell, .grid-cell {
+      position: relative;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      padding: 0 9px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      border-right: 1px solid var(--border);
+    }
+    .header-cell { font-weight: 650; cursor: pointer; }
+    .header-cell:hover { background: var(--accent-soft); }
+    .sort-indicator { margin-left: 5px; color: var(--accent); }
+    .column-resizer {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      z-index: 4;
+      width: 9px;
+      height: 100%;
+      cursor: col-resize;
+    }
+    .column-resizer:hover, body.resizing-column .column-resizer { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+    body.resizing-column { cursor: col-resize; user-select: none; }
+    .rows-layer { position: absolute; left: 0; right: 0; }
+    .grid-row {
+      position: absolute;
+      left: 0;
+      display: grid;
+      height: var(--row-height);
+      font-size: var(--table-font-size);
+      border-bottom: 1px solid var(--border);
+    }
+    .grid-row:nth-child(even) .grid-cell { background: color-mix(in srgb, var(--surface-alt) 55%, transparent); }
+    .grid-row:hover .grid-cell { background: var(--accent-soft); }
+    .grid-cell.numeric { justify-content: flex-end; font-variant-numeric: tabular-nums; }
+    .grid-cell.positive { color: var(--positive); }
+    .grid-cell.negative { color: var(--negative); }
+    .grid-cell.warning { color: var(--warning); }
+    .frozen {
+      position: sticky;
+      z-index: 8;
+      background: var(--surface) !important;
+      box-shadow: 1px 0 0 var(--border);
+    }
+    .grid-header .frozen { z-index: 24; background: var(--surface-alt) !important; }
+    .empty-state {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .empty-state strong { display: block; color: var(--text); margin-bottom: 5px; }
+    .footer-note { margin: 9px 2px 0; color: var(--muted); font-size: 12px; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 680px) {
+      .app { padding: 10px; }
+      .actions { justify-content: flex-start; }
+      .toolbar { align-items: flex-start; }
+      .filters, .view-controls { width: 100%; min-width: 0; }
+      .filters > *, .view-controls > * { flex: 0 0 auto; }
+      .field.search { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; flex-basis: 100%; }
+      .field input[type="search"] { width: 100%; min-width: 0; }
+      .chart-toolbar { align-items: flex-start; }
+      .chart-title { width: 100%; }
+      .chart-viewport { height: 360px; }
+      .grid-shell { height: 65vh; resize: vertical; }
+      .status { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="app">
+    <header class="topbar">
+      <div>
+        <h1>Dota 2 MMR 数据表格</h1>
+        <p class="subtitle">共通本地浏览器 · 数据只在当前浏览器中处理</p>
+      </div>
+      <div class="actions">
+        <input id="fileInput" type="file" accept=".csv,.json,text/csv,application/json" hidden>
+        <button id="openButton" type="button" class="primary">选择 CSV / JSON</button>
+        <button id="restoreButton" type="button" disabled>恢复上次数据</button>
+        <button id="exportCsvButton" type="button" disabled>导出筛选 CSV</button>
+        <button id="exportHtmlButton" type="button" disabled>导出独立 HTML</button>
+      </div>
+    </header>
+
+    <section class="drop-zone" id="dropZone" aria-label="文件拖放区域">
+      <div class="dataset-line">
+        <span class="dataset-name" id="datasetName">尚未加载数据</span>
+        <span class="dataset-meta" id="datasetMeta">把 match-estimates.csv 或 mmr-dataset.json 拖到这里</span>
+        <span class="status" id="status" role="status">等待文件</span>
+      </div>
+    </section>
+
+    <section class="toolbar" aria-label="表格控制">
+      <div class="filters">
+        <label class="field search">搜索
+          <input id="searchInput" type="search" placeholder="MatchID、日期、来源……" disabled>
+        </label>
+        <label class="field">类型
+          <select id="sourceFilter" disabled>
+            <option value="all">全部</option>
+            <option value="actual">GC 真实</option>
+            <option value="modeled">模型估算</option>
+          </select>
+        </label>
+        <label class="field">胜负
+          <select id="resultFilter" disabled>
+            <option value="all">全部</option>
+            <option value="Win">胜</option>
+            <option value="Loss">负</option>
+          </select>
+        </label>
+        <label class="field">区间
+          <select id="segmentFilter" disabled><option value="all">全部</option></select>
+        </label>
+        <label class="field">
+          <input id="ddFilter" type="checkbox" disabled> DD ≥20%
+        </label>
+        <button id="resetFiltersButton" type="button" disabled>重置筛选</button>
+      </div>
+      <div class="view-controls">
+        <label class="field">缩放
+          <input id="scaleInput" type="range" min="0.7" max="1.8" step="0.1" value="1">
+          <span class="scale-value" id="scaleValue">100%</span>
+        </label>
+        <details class="columns" id="columnDetails">
+          <summary>显示列</summary>
+          <div class="column-picker" id="columnPicker"></div>
+        </details>
+        <button id="fullscreenButton" type="button">全屏表格</button>
+        <button id="clearCacheButton" type="button" disabled>清除缓存</button>
+      </div>
+    </section>
+
+    <section class="chart-section" id="chartSection" aria-label="MMR 变化折线图">
+      <div class="chart-toolbar">
+        <h2 class="chart-title">MMR 变化曲线</h2>
+        <div class="chart-legend" aria-label="曲线图例">
+          <label class="series-toggle">
+            <input id="chartActualToggle" type="checkbox" checked disabled>
+            <span class="series-swatch" aria-hidden="true"></span>GC 真实
+          </label>
+          <label class="series-toggle">
+            <input id="chartModeledToggle" type="checkbox" checked disabled>
+            <span class="series-swatch modeled" aria-hidden="true"></span>模型拟合
+          </label>
+        </div>
+        <div class="chart-actions">
+          <button id="chartZoomOutButton" type="button" disabled>缩小</button>
+          <button id="chartZoomInButton" type="button" disabled>放大</button>
+          <button id="chartFitButton" type="button" disabled>显示全部</button>
+          <button id="chartFullscreenButton" type="button">图表全屏</button>
+        </div>
+      </div>
+      <div class="chart-viewport" id="chartViewport">
+        <svg class="chart-svg" id="chartSvg" role="img" aria-label="MMR 随比赛时间变化的交互式折线图"></svg>
+        <div class="chart-tooltip hidden" id="chartTooltip" role="tooltip"></div>
+        <div class="chart-empty" id="chartEmpty">导入数据后显示 MMR 曲线</div>
+      </div>
+      <div class="chart-meta" id="chartMeta">滚轮缩放时间轴；Ctrl + 滚轮缩放 MMR；按住拖动可平移；双击恢复全图。</div>
+    </section>
+
+    <section class="grid-shell" id="gridShell" tabindex="0" aria-label="MMR 数据表格">
+      <div class="grid-canvas" id="gridCanvas">
+        <div class="grid-header" id="gridHeader" role="row"></div>
+        <div class="rows-layer" id="rowsLayer"></div>
+      </div>
+      <div class="empty-state" id="emptyState">
+        <div><strong>选择或拖入一份数据</strong>支持 match-estimates.csv、complete-mmr-curve.csv 和 mmr-dataset.json</div>
+      </div>
+    </section>
+    <p class="footer-note">拖动表格右下角可改变区域大小；拖动表头分隔线可改变列宽。所有设置保存在本机浏览器。</p>
+  </main>
+
+  <script id="viewer-script">
+  (() => {
+    "use strict";
+
+    const DB_NAME = "dota2-mmr-table-viewer";
+    const DB_VERSION = 1;
+    const STORE_NAME = "datasets";
+    const SETTINGS_KEY = "dota2-mmr-table-viewer-settings-v1";
+    const OVERSCAN = 8;
+    const PREFERRED_COLUMNS = [
+      "date_utc", "match_id", "result", "hero_id", "mmr_fields_visible",
+      "actual_start_mmr", "actual_rank_change", "actual_end_mmr",
+      "modeled_rank_change", "curve_mmr_before", "curve_mmr_after",
+      "confidence_used", "uncertainty_proxy", "double_down_probability",
+      "expected_double_down_multiplier", "double_down_status", "segment",
+      "normal_rank_change_prior", "unconstrained_rank_change",
+      "endpoint_correction", "segment_endpoint_mmr", "segment_endpoint_source",
+      "anchor_jump_before", "curve_source", "unix_time", "average_rank", "party_size"
+    ];
+    const LABELS = {
+      date_utc: "时间（UTC）", match_id: "MatchID", result: "胜负", hero_id: "英雄ID",
+      mmr_fields_visible: "数据类型", actual_start_mmr: "真实赛前MMR",
+      actual_rank_change: "真实变化", actual_end_mmr: "真实赛后MMR",
+      modeled_rank_change: "曲线变化", curve_mmr_before: "曲线赛前MMR",
+      curve_mmr_after: "曲线赛后MMR", confidence_used: "Confidence",
+      uncertainty_proxy: "Uncertainty", double_down_probability: "DD概率",
+      expected_double_down_multiplier: "期望倍率", double_down_status: "DD状态",
+      segment: "隐藏区间", normal_rank_change_prior: "普通先验",
+      unconstrained_rank_change: "混合先验", endpoint_correction: "端点修正",
+      segment_endpoint_mmr: "区间终点MMR", segment_endpoint_source: "终点来源",
+      anchor_jump_before: "锚点跳变", curve_source: "数据来源", unix_time: "Unix时间",
+      average_rank: "平均奖章", party_size: "组队人数", confidence_proxy: "Confidence代理",
+      confidence_regime: "Confidence区间", likely_double_down: "疑似DD",
+      model_version: "模型版本"
+    };
+    const DEFAULT_HIDDEN = new Set(["unix_time", "confidence_proxy", "likely_double_down"]);
+    const NUMBER_HINTS = ["mmr", "rank", "change", "probability", "multiplier", "confidence", "uncertainty", "segment", "hero_id", "unix_time", "party_size"];
+    const state = {
+      rows: [], filteredRows: [], allColumns: [], columns: [], metadata: {},
+      fileName: "", sort: {key: "date_utc", direction: "asc"},
+      scale: 1, widths: {}, hiddenColumns: new Set(DEFAULT_HIDDEN), renderToken: 0,
+      chart: {
+        points: [], fullX: null, fullY: null, viewX: null, viewY: null,
+        drag: null, hoverIndex: -1, renderToken: 0
+      }
+    };
+
+    const $ = id => document.getElementById(id);
+    const els = {
+      app: $("app"), fileInput: $("fileInput"), openButton: $("openButton"),
+      restoreButton: $("restoreButton"), exportCsvButton: $("exportCsvButton"),
+      exportHtmlButton: $("exportHtmlButton"), dropZone: $("dropZone"),
+      datasetName: $("datasetName"), datasetMeta: $("datasetMeta"), status: $("status"),
+      searchInput: $("searchInput"), sourceFilter: $("sourceFilter"),
+      resultFilter: $("resultFilter"), segmentFilter: $("segmentFilter"),
+      ddFilter: $("ddFilter"), resetFiltersButton: $("resetFiltersButton"),
+      scaleInput: $("scaleInput"), scaleValue: $("scaleValue"),
+      columnPicker: $("columnPicker"), columnDetails: $("columnDetails"),
+      fullscreenButton: $("fullscreenButton"), clearCacheButton: $("clearCacheButton"),
+      chartSection: $("chartSection"), chartViewport: $("chartViewport"),
+      chartSvg: $("chartSvg"), chartTooltip: $("chartTooltip"), chartEmpty: $("chartEmpty"),
+      chartMeta: $("chartMeta"), chartActualToggle: $("chartActualToggle"),
+      chartModeledToggle: $("chartModeledToggle"), chartZoomOutButton: $("chartZoomOutButton"),
+      chartZoomInButton: $("chartZoomInButton"), chartFitButton: $("chartFitButton"),
+      chartFullscreenButton: $("chartFullscreenButton"),
+      gridShell: $("gridShell"), gridCanvas: $("gridCanvas"),
+      gridHeader: $("gridHeader"), rowsLayer: $("rowsLayer"), emptyState: $("emptyState")
+    };
+
+    function loadSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+        if (Number.isFinite(saved.scale)) state.scale = Math.min(1.8, Math.max(.7, saved.scale));
+        if (saved.widths && typeof saved.widths === "object") state.widths = saved.widths;
+        if (Array.isArray(saved.hiddenColumns)) state.hiddenColumns = new Set(saved.hiddenColumns);
+      } catch { /* ignore invalid local settings */ }
+      els.scaleInput.value = String(state.scale);
+      applyScale();
+    }
+
+    function saveSettings() {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        scale: state.scale, widths: state.widths,
+        hiddenColumns: [...state.hiddenColumns]
+      }));
+    }
+
+    function openDatabase() {
+      return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error("当前浏览器不支持 IndexedDB")); return; }
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, {keyPath: "id"});
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function cacheDataset(payload) {
+      try {
+        const db = await openDatabase();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          tx.objectStore(STORE_NAME).put({id: "last", ...payload, cachedAt: new Date().toISOString()});
+          tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+        els.restoreButton.disabled = false;
+        els.clearCacheButton.disabled = false;
+      } catch (error) { console.warn("缓存数据失败", error); }
+    }
+
+    async function readCachedDataset() {
+      try {
+        const db = await openDatabase();
+        const value = await new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, "readonly");
+          const request = tx.objectStore(STORE_NAME).get("last");
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error);
+        });
+        db.close();
+        return value;
+      } catch { return null; }
+    }
+
+    async function clearCache() {
+      const db = await openDatabase();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).delete("last");
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+      els.restoreButton.disabled = true;
+      els.clearCacheButton.disabled = true;
+      setStatus("已清除浏览器缓存");
+    }
+
+    function parseCsv(text) {
+      text = text.replace(/^\uFEFF/, "");
+      const records = [];
+      let record = [], field = "", quoted = false;
+      for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        if (quoted) {
+          if (char === '"' && text[i + 1] === '"') { field += '"'; i += 1; }
+          else if (char === '"') quoted = false;
+          else field += char;
+        } else if (char === '"' && field.length === 0) quoted = true;
+        else if (char === ",") { record.push(field); field = ""; }
+        else if (char === "\n" || char === "\r") {
+          if (char === "\r" && text[i + 1] === "\n") i += 1;
+          record.push(field); field = "";
+          if (record.some(value => value !== "")) records.push(record);
+          record = [];
+        } else field += char;
+      }
+      if (field !== "" || record.length) { record.push(field); records.push(record); }
+      if (!records.length) throw new Error("CSV 没有数据");
+      const seen = new Map();
+      const headers = records[0].map((raw, index) => {
+        const base = raw.trim() || `column_${index + 1}`;
+        const count = seen.get(base) || 0; seen.set(base, count + 1);
+        return count ? `${base}_${count + 1}` : base;
+      });
+      return records.slice(1).map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
+    }
+
+    function parseJson(text) {
+      const value = JSON.parse(text);
+      if (Array.isArray(value)) return {rows: value, metadata: {}};
+      if (!value || typeof value !== "object") throw new Error("JSON 顶层必须是数组或对象");
+      const rows = value.rows || value.data || value.matches;
+      if (!Array.isArray(rows)) throw new Error("JSON 中没有 rows、data 或 matches 数组");
+      const metadata = {...(value.metadata || {})};
+      for (const key of ["account_id", "model_version", "schema_version", "generated_at_utc"]) {
+        if (value[key] !== undefined) metadata[key] = value[key];
+      }
+      return {rows, metadata};
+    }
+
+    async function loadFile(file) {
+      setStatus(`读取 ${file.name}…`);
+      const text = await file.text();
+      const parsed = file.name.toLowerCase().endsWith(".json") ? parseJson(text) : {rows: parseCsv(text), metadata: {}};
+      await setDataset({fileName: file.name, rows: parsed.rows, metadata: parsed.metadata}, {cache: true});
+    }
+
+    function inferColumns(rows) {
+      const keys = new Set();
+      for (const row of rows.slice(0, 500)) Object.keys(row).forEach(key => keys.add(key));
+      const ordered = [...PREFERRED_COLUMNS.filter(key => keys.has(key)), ...[...keys].filter(key => !PREFERRED_COLUMNS.includes(key)).sort()];
+      return ordered.map((key, index) => ({
+        key, label: LABELS[key] || key,
+        width: Number(state.widths[key]) || defaultColumnWidth(key, index),
+        frozen: key === "date_utc" || key === "match_id"
+      }));
+    }
+
+    function defaultColumnWidth(key, index) {
+      if (key === "date_utc") return 220;
+      if (key === "match_id") return 132;
+      if (["curve_source", "double_down_status", "segment_endpoint_source"].includes(key)) return 190;
+      if (key.includes("probability") || key.includes("confidence")) return 125;
+      if (key === "result" || key === "segment" || key === "hero_id") return 88;
+      return index < 5 ? 120 : 142;
+    }
+
+    function normalizeRows(rows) {
+      if (!Array.isArray(rows)) throw new Error("数据行必须是数组");
+      return rows.filter(row => row && typeof row === "object" && !Array.isArray(row));
+    }
+
+    async function setDataset(payload, options = {}) {
+      const rows = normalizeRows(payload.rows);
+      if (!rows.length) throw new Error("没有可显示的数据行");
+      state.rows = rows; state.metadata = payload.metadata || {}; state.fileName = payload.fileName || "embedded-data.json";
+      state.allColumns = inferColumns(rows);
+      state.columns = state.allColumns.filter(column => !state.hiddenColumns.has(column.key));
+      state.sort = {key: state.allColumns.some(column => column.key === "date_utc") ? "date_utc" : state.allColumns[0].key, direction: "asc"};
+      populateSegmentFilter(); renderColumnPicker(); enableControls(true); applyFilters();
+      els.datasetName.textContent = state.fileName;
+      els.datasetMeta.textContent = datasetDescription();
+      els.emptyState.classList.add("hidden");
+      if (options.cache) await cacheDataset({fileName: state.fileName, rows, metadata: state.metadata});
+      setStatus(`已加载 ${rows.length.toLocaleString()} 行`);
+    }
+
+    function datasetDescription() {
+      const parts = [];
+      if (state.metadata.account_id) parts.push(`账号 ${state.metadata.account_id}`);
+      if (state.metadata.model_version) parts.push(String(state.metadata.model_version));
+      parts.push(`${state.rows.length.toLocaleString()} 行`);
+      return parts.join(" · ");
+    }
+
+    function enableControls(enabled) {
+      for (const element of [
+        els.searchInput, els.sourceFilter, els.resultFilter, els.segmentFilter,
+        els.ddFilter, els.resetFiltersButton, els.exportCsvButton, els.exportHtmlButton,
+        els.chartActualToggle, els.chartModeledToggle, els.chartZoomOutButton,
+        els.chartZoomInButton, els.chartFitButton
+      ]) element.disabled = !enabled;
+    }
+
+    function populateSegmentFilter() {
+      const values = [...new Set(state.rows.map(row => String(row.segment ?? "").trim()).filter(Boolean))].sort((a, b) => numericAwareCompare(a, b));
+      els.segmentFilter.replaceChildren(new Option("全部", "all"), ...values.map(value => new Option(`区间 ${value}`, value)));
+    }
+
+    function renderColumnPicker() {
+      els.columnPicker.replaceChildren();
+      for (const column of state.allColumns) {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox"; input.checked = !state.hiddenColumns.has(column.key);
+        input.addEventListener("change", () => {
+          if (input.checked) state.hiddenColumns.delete(column.key); else state.hiddenColumns.add(column.key);
+          state.columns = state.allColumns.filter(item => !state.hiddenColumns.has(item.key));
+          saveSettings(); buildHeader(); updateGeometry(); renderRows();
+        });
+        label.append(input, document.createTextNode(column.label)); els.columnPicker.append(label);
+      }
+    }
+
+    let filterTimer = 0;
+    function scheduleFilters() { clearTimeout(filterTimer); filterTimer = setTimeout(applyFilters, 140); }
+
+    function applyFilters() {
+      const query = els.searchInput.value.trim().toLocaleLowerCase();
+      const source = els.sourceFilter.value, result = els.resultFilter.value, segment = els.segmentFilter.value;
+      const ddOnly = els.ddFilter.checked;
+      let rows = state.rows.filter(row => {
+        if (source !== "all") {
+          const visible = toBoolean(row.mmr_fields_visible);
+          if (source === "actual" && visible !== true) return false;
+          if (source === "modeled" && visible === true) return false;
+        }
+        if (result !== "all" && String(row.result ?? "") !== result) return false;
+        if (segment !== "all" && String(row.segment ?? "") !== segment) return false;
+        if (ddOnly && !(toNumber(row.double_down_probability) >= .20)) return false;
+        if (query && !Object.values(row).some(value => String(value ?? "").toLocaleLowerCase().includes(query))) return false;
+        return true;
+      });
+      const {key, direction} = state.sort;
+      if (key) rows = rows.map((row, index) => ({row, index})).sort((a, b) => {
+        const compared = compareValues(a.row[key], b.row[key]);
+        return compared === 0 ? a.index - b.index : compared * (direction === "asc" ? 1 : -1);
+      }).map(item => item.row);
+      state.filteredRows = rows;
+      els.gridShell.scrollTop = 0; buildHeader(); updateGeometry(); renderRows();
+      updateChartData({fit: true});
+      setStatus(`显示 ${rows.length.toLocaleString()} / ${state.rows.length.toLocaleString()} 行`);
+    }
+
+    function resetFilters() {
+      els.searchInput.value = ""; els.sourceFilter.value = "all"; els.resultFilter.value = "all";
+      els.segmentFilter.value = "all"; els.ddFilter.checked = false; applyFilters();
+    }
+
+    function toBoolean(value) {
+      if (value === true || value === 1) return true;
+      if (value === false || value === 0) return false;
+      const normalized = String(value ?? "").toLowerCase();
+      if (["true", "1", "yes"].includes(normalized)) return true;
+      if (["false", "0", "no"].includes(normalized)) return false;
+      return null;
+    }
+
+    function toNumber(value) {
+      if (value === null || value === undefined || value === "") return NaN;
+      const number = Number(value); return Number.isFinite(number) ? number : NaN;
+    }
+
+    function compareValues(a, b) {
+      const aNumber = toNumber(a), bNumber = toNumber(b);
+      if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return aNumber - bNumber;
+      const aDate = Date.parse(String(a ?? "")), bDate = Date.parse(String(b ?? ""));
+      if (Number.isFinite(aDate) && Number.isFinite(bDate)) return aDate - bDate;
+      return numericAwareCompare(String(a ?? ""), String(b ?? ""));
+    }
+
+    const collator = new Intl.Collator("zh-CN", {numeric: true, sensitivity: "base"});
+    function numericAwareCompare(a, b) { return collator.compare(String(a), String(b)); }
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const CHART_PADDING = {top: 18, right: 22, bottom: 48, left: 68};
+
+    function firstValue(row, keys) {
+      for (const key of keys) {
+        if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+      }
+      return null;
+    }
+
+    function chartPointFromRow(row, rowIndex) {
+      const rawTime = firstValue(row, ["date_utc", "Date", "date", "datetime", "Unix time", "unix_time"]);
+      let time = Number(rawTime);
+      if (Number.isFinite(time) && time < 100_000_000_000) time *= 1000;
+      else time = Date.parse(String(rawTime ?? ""));
+      if (!Number.isFinite(time)) return null;
+
+      const before = toNumber(firstValue(row, ["curve_mmr_before", "actual_start_mmr", "Start MMR", "start_mmr"]));
+      const change = toNumber(firstValue(row, ["modeled_rank_change", "actual_rank_change", "Rank Change", "rank_change"]));
+      let mmr = toNumber(firstValue(row, ["curve_mmr_after", "actual_end_mmr", "End MMR", "end_mmr", "mmr"]));
+      if (!Number.isFinite(mmr) && Number.isFinite(before) && Number.isFinite(change)) mmr = before + change;
+      if (!Number.isFinite(mmr) && Number.isFinite(before)) mmr = before;
+      if (!Number.isFinite(mmr)) return null;
+
+      const visible = toBoolean(row.mmr_fields_visible);
+      const sourceText = String(firstValue(row, ["curve_source", "source", "data_source"]) ?? "").toLowerCase();
+      const source = visible === false || sourceText.includes("model") || sourceText.includes("constraint") ? "modeled" : "actual";
+      return {time, mmr, before, change, source, row, rowIndex};
+    }
+
+    function updateChartData({fit = false} = {}) {
+      const points = state.filteredRows.map(chartPointFromRow).filter(Boolean).sort((a, b) => a.time - b.time || a.rowIndex - b.rowIndex);
+      state.chart.points = points;
+      if (!points.length) {
+        state.chart.fullX = state.chart.fullY = state.chart.viewX = state.chart.viewY = null;
+        els.chartSvg.replaceChildren(); els.chartEmpty.classList.remove("hidden");
+        els.chartMeta.textContent = "当前筛选结果中没有可绘制的时间与 MMR 字段。";
+        hideChartTooltip();
+        return;
+      }
+      const firstTime = points[0].time, lastTime = points[points.length - 1].time;
+      const xPadding = firstTime === lastTime ? 86_400_000 : 0;
+      const values = points.map(point => point.mmr);
+      const yMin = Math.min(...values), yMax = Math.max(...values);
+      const yPadding = Math.max(40, (yMax - yMin) * .07);
+      state.chart.fullX = [firstTime - xPadding, lastTime + xPadding];
+      state.chart.fullY = [Math.floor((yMin - yPadding) / 10) * 10, Math.ceil((yMax + yPadding) / 10) * 10];
+      if (fit || !state.chart.viewX || !state.chart.viewY) fitChart();
+      else {
+        state.chart.viewX = clampDomain(state.chart.viewX, state.chart.fullX, 3_600_000);
+        state.chart.viewY = clampDomain(state.chart.viewY, state.chart.fullY, 10);
+        renderChart();
+      }
+      els.chartEmpty.classList.add("hidden");
+    }
+
+    function clampDomain(domain, full, minimumSpan) {
+      const fullSpan = full[1] - full[0];
+      let span = Math.max(minimumSpan, domain[1] - domain[0]);
+      if (span >= fullSpan) return [...full];
+      const start = Math.min(full[1] - span, Math.max(full[0], domain[0]));
+      return [start, start + span];
+    }
+
+    function fitChart() {
+      if (!state.chart.fullX || !state.chart.fullY) return;
+      state.chart.viewX = [...state.chart.fullX]; state.chart.viewY = [...state.chart.fullY];
+      renderChart();
+    }
+
+    function createSvgElement(name, attributes = {}, text = "") {
+      const element = document.createElementNS(SVG_NS, name);
+      for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
+      if (text) element.textContent = text;
+      return element;
+    }
+
+    function lowerBound(points, time) {
+      let low = 0, high = points.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (points[middle].time < time) low = middle + 1; else high = middle;
+      }
+      return low;
+    }
+
+    function formatUtcTick(value, span) {
+      const date = new Date(value);
+      const options = span > 365 * 86_400_000 * 10
+        ? {year: "numeric"}
+        : span > 100 * 86_400_000
+          ? {year: "numeric", month: "2-digit"}
+          : {month: "2-digit", day: "2-digit"};
+      return new Intl.DateTimeFormat("zh-CN", {...options, timeZone: "UTC"}).format(date);
+    }
+
+    function renderChart() {
+      const token = ++state.chart.renderToken;
+      requestAnimationFrame(() => {
+        if (token !== state.chart.renderToken || !state.chart.viewX || !state.chart.viewY) return;
+        const width = Math.max(320, els.chartViewport.clientWidth);
+        const height = Math.max(280, els.chartViewport.clientHeight);
+        const plot = {
+          left: CHART_PADDING.left, top: CHART_PADDING.top,
+          right: width - CHART_PADDING.right, bottom: height - CHART_PADDING.bottom
+        };
+        plot.width = Math.max(1, plot.right - plot.left); plot.height = Math.max(1, plot.bottom - plot.top);
+        const [x0, x1] = state.chart.viewX, [y0, y1] = state.chart.viewY;
+        const xScale = value => plot.left + (value - x0) / (x1 - x0) * plot.width;
+        const yScale = value => plot.bottom - (value - y0) / (y1 - y0) * plot.height;
+        state.chart.layout = {width, height, plot, xScale, yScale};
+
+        els.chartSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        els.chartSvg.replaceChildren(
+          createSvgElement("title", {}, "MMR 随比赛时间变化的交互式曲线"),
+          createSvgElement("desc", {}, "蓝色实线代表 GC 真实 MMR，橙色虚线代表模型拟合 MMR。滚轮缩放，拖动平移。")
+        );
+        const defs = createSvgElement("defs");
+        const clip = createSvgElement("clipPath", {id: "chartPlotClip"});
+        clip.append(createSvgElement("rect", {x: plot.left, y: plot.top, width: plot.width, height: plot.height}));
+        defs.append(clip); els.chartSvg.append(defs);
+
+        const xTicks = width < 560 ? 4 : width < 900 ? 6 : 9;
+        for (let index = 0; index <= xTicks; index += 1) {
+          const value = x0 + (x1 - x0) * index / xTicks, x = xScale(value);
+          els.chartSvg.append(createSvgElement("line", {class: "grid-line", x1: x, y1: plot.top, x2: x, y2: plot.bottom}));
+          const anchor = index === 0 ? "start" : index === xTicks ? "end" : "middle";
+          els.chartSvg.append(createSvgElement("text", {x, y: plot.bottom + 20, "text-anchor": anchor}, formatUtcTick(value, x1 - x0)));
+        }
+        const yTicks = 6;
+        for (let index = 0; index <= yTicks; index += 1) {
+          const value = y0 + (y1 - y0) * index / yTicks, y = yScale(value);
+          els.chartSvg.append(createSvgElement("line", {class: "grid-line", x1: plot.left, y1: y, x2: plot.right, y2: y}));
+          els.chartSvg.append(createSvgElement("text", {x: plot.left - 9, y: y + 4, "text-anchor": "end"}, Math.round(value).toLocaleString()));
+        }
+        els.chartSvg.append(
+          createSvgElement("rect", {class: "plot-frame", x: plot.left, y: plot.top, width: plot.width, height: plot.height}),
+          createSvgElement("text", {class: "axis-title", x: (plot.left + plot.right) / 2, y: height - 8, "text-anchor": "middle"}, "比赛时间（UTC）"),
+          createSvgElement("text", {class: "axis-title", x: 16, y: (plot.top + plot.bottom) / 2, transform: `rotate(-90 16 ${(plot.top + plot.bottom) / 2})`, "text-anchor": "middle"}, "MMR")
+        );
+
+        const start = Math.max(0, lowerBound(state.chart.points, x0) - 1);
+        const end = Math.min(state.chart.points.length, lowerBound(state.chart.points, x1) + 1);
+        const visiblePoints = state.chart.points.slice(start, end);
+        let actualPath = "", modeledPath = "";
+        for (let index = 1; index < visiblePoints.length; index += 1) {
+          const previous = visiblePoints[index - 1], point = visiblePoints[index];
+          const command = `M${xScale(previous.time).toFixed(2)},${yScale(previous.mmr).toFixed(2)}L${xScale(point.time).toFixed(2)},${yScale(point.mmr).toFixed(2)}`;
+          if (point.source === "modeled") modeledPath += command; else actualPath += command;
+        }
+        const seriesGroup = createSvgElement("g", {"clip-path": "url(#chartPlotClip)"});
+        if (els.chartActualToggle.checked && actualPath) seriesGroup.append(createSvgElement("path", {class: "series-actual", d: actualPath}));
+        if (els.chartModeledToggle.checked && modeledPath) seriesGroup.append(createSvgElement("path", {class: "series-modeled", d: modeledPath}));
+        if (visiblePoints.length <= 300) {
+          for (const point of visiblePoints) {
+            if ((point.source === "actual" && !els.chartActualToggle.checked) || (point.source === "modeled" && !els.chartModeledToggle.checked)) continue;
+            seriesGroup.append(createSvgElement("circle", {class: point.source === "modeled" ? "point-modeled" : "point-actual", cx: xScale(point.time), cy: yScale(point.mmr), r: 2.3}));
+          }
+        }
+        els.chartSvg.append(seriesGroup);
+        els.chartSvg.append(
+          createSvgElement("line", {id: "chartHoverGuide", class: "hover-guide hidden", x1: 0, y1: plot.top, x2: 0, y2: plot.bottom}),
+          createSvgElement("circle", {id: "chartHoverMarker", class: "hover-marker hidden", cx: 0, cy: 0, r: 4}),
+          createSvgElement("rect", {class: "interaction-layer", x: plot.left, y: plot.top, width: plot.width, height: plot.height})
+        );
+        const from = new Date(x0).toISOString().slice(0, 10), to = new Date(x1).toISOString().slice(0, 10);
+        els.chartMeta.textContent = `${from} → ${to} · MMR ${Math.round(y0).toLocaleString()}–${Math.round(y1).toLocaleString()} · 视窗内 ${Math.max(0, end - start).toLocaleString()} 场；滚轮缩放时间轴，Ctrl + 滚轮缩放 MMR，拖动平移。`;
+        hideChartTooltip();
+      });
+    }
+
+    function zoomChart(factor, anchorX = .5, anchorY = .5, axis = "both") {
+      if (!state.chart.viewX || !state.chart.viewY) return;
+      if (axis === "both" || axis === "x") {
+        const [start, end] = state.chart.viewX, anchor = start + (end - start) * anchorX;
+        state.chart.viewX = clampDomain([anchor - (anchor - start) * factor, anchor + (end - anchor) * factor], state.chart.fullX, 3_600_000);
+      }
+      if (axis === "both" || axis === "y") {
+        const [start, end] = state.chart.viewY, anchor = start + (end - start) * (1 - anchorY);
+        state.chart.viewY = clampDomain([anchor - (anchor - start) * factor, anchor + (end - anchor) * factor], state.chart.fullY, 10);
+      }
+      renderChart();
+    }
+
+    function hideChartTooltip() {
+      state.chart.hoverIndex = -1; els.chartTooltip.classList.add("hidden");
+      document.getElementById("chartHoverGuide")?.classList.add("hidden");
+      document.getElementById("chartHoverMarker")?.classList.add("hidden");
+    }
+
+    function nearestVisiblePoint(time) {
+      const points = state.chart.points; if (!points.length) return null;
+      const center = Math.min(points.length - 1, lowerBound(points, time));
+      let best = null;
+      for (let offset = -8; offset <= 8; offset += 1) {
+        const index = center + offset, point = points[index]; if (!point) continue;
+        if ((point.source === "actual" && !els.chartActualToggle.checked) || (point.source === "modeled" && !els.chartModeledToggle.checked)) continue;
+        const distance = Math.abs(point.time - time);
+        if (!best || distance < best.distance) best = {index, point, distance};
+      }
+      return best;
+    }
+
+    function showChartTooltip(event) {
+      if (state.chart.drag || !state.chart.layout || !state.chart.viewX) return;
+      const rect = els.chartViewport.getBoundingClientRect(), {plot, xScale, yScale} = state.chart.layout;
+      const x = event.clientX - rect.left, y = event.clientY - rect.top;
+      if (x < plot.left || x > plot.right || y < plot.top || y > plot.bottom) { hideChartTooltip(); return; }
+      const [x0, x1] = state.chart.viewX, time = x0 + (x - plot.left) / plot.width * (x1 - x0);
+      const nearest = nearestVisiblePoint(time); if (!nearest) { hideChartTooltip(); return; }
+      const {point, index} = nearest; state.chart.hoverIndex = index;
+      const guide = document.getElementById("chartHoverGuide"), marker = document.getElementById("chartHoverMarker");
+      const pointX = xScale(point.time), pointY = yScale(point.mmr);
+      guide?.setAttribute("x1", pointX); guide?.setAttribute("x2", pointX); guide?.classList.remove("hidden");
+      marker?.setAttribute("cx", pointX); marker?.setAttribute("cy", pointY);
+      marker?.setAttribute("stroke", point.source === "modeled" ? "var(--chart-modeled)" : "var(--chart-actual)"); marker?.classList.remove("hidden");
+      const title = document.createElement("strong"); title.textContent = `${new Date(point.time).toISOString().replace(".000Z", "Z")} · ${Math.round(point.mmr).toLocaleString()} MMR`;
+      const source = document.createElement("div"); source.textContent = point.source === "modeled" ? "模型拟合" : "GC 真实";
+      const details = document.createElement("div");
+      const delta = Number.isFinite(point.change) ? `${point.change > 0 ? "+" : ""}${Math.round(point.change)}` : "—";
+      const result = formatValue("result", point.row.result, point.row);
+      const matchId = firstValue(point.row, ["match_id", "MatchID", "Match ID"]);
+      details.textContent = `${result === "undefined" ? "" : result} · 变化 ${delta}${matchId ? ` · Match ${matchId}` : ""}`;
+      els.chartTooltip.replaceChildren(title, source, details); els.chartTooltip.classList.remove("hidden");
+      const tooltipWidth = els.chartTooltip.offsetWidth, tooltipHeight = els.chartTooltip.offsetHeight;
+      els.chartTooltip.style.left = `${Math.max(8, Math.min(rect.width - tooltipWidth - 8, pointX + 12))}px`;
+      els.chartTooltip.style.top = `${Math.max(8, Math.min(rect.height - tooltipHeight - 8, pointY - tooltipHeight - 12))}px`;
+    }
+
+    function gridTemplate() { return state.columns.map(column => `${column.width}px`).join(" "); }
+
+    function frozenOffsets() {
+      let offset = 0; const result = new Map();
+      for (const column of state.columns) {
+        if (column.frozen) { result.set(column.key, offset); offset += column.width; }
+      }
+      return result;
+    }
+
+    function buildHeader() {
+      els.gridHeader.replaceChildren();
+      const template = gridTemplate(); els.gridHeader.style.gridTemplateColumns = template;
+      const offsets = frozenOffsets();
+      for (const column of state.columns) {
+        const cell = document.createElement("div");
+        cell.className = "header-cell"; cell.role = "columnheader"; cell.title = `按 ${column.label} 排序`;
+        if (column.frozen) { cell.classList.add("frozen"); cell.style.left = `${offsets.get(column.key)}px`; }
+        cell.append(document.createTextNode(column.label));
+        if (state.sort.key === column.key) {
+          const indicator = document.createElement("span"); indicator.className = "sort-indicator";
+          indicator.textContent = state.sort.direction === "asc" ? "▲" : "▼"; cell.append(indicator);
+        }
+        cell.addEventListener("click", () => {
+          state.sort = state.sort.key === column.key ? {key: column.key, direction: state.sort.direction === "asc" ? "desc" : "asc"} : {key: column.key, direction: "asc"};
+          applyFilters();
+        });
+        const handle = document.createElement("span"); handle.className = "column-resizer";
+        handle.addEventListener("pointerdown", event => beginColumnResize(event, column));
+        cell.append(handle); els.gridHeader.append(cell);
+      }
+    }
+
+    function beginColumnResize(event, column) {
+      event.preventDefault(); event.stopPropagation(); document.body.classList.add("resizing-column");
+      const startX = event.clientX, startWidth = column.width;
+      const move = moveEvent => {
+        column.width = Math.max(64, Math.min(520, Math.round(startWidth + moveEvent.clientX - startX)));
+        state.widths[column.key] = column.width; buildHeader(); updateGeometry(); renderRows();
+      };
+      const up = () => {
+        document.body.classList.remove("resizing-column");
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); saveSettings();
+      };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, {once: true});
+    }
+
+    function applyScale() {
+      document.documentElement.style.setProperty("--row-height", `${Math.round(34 * state.scale)}px`);
+      document.documentElement.style.setProperty("--header-height", `${Math.round(42 * state.scale)}px`);
+      document.documentElement.style.setProperty("--table-font-size", `${Math.max(11, 13 * state.scale)}px`);
+      els.scaleValue.textContent = `${Math.round(state.scale * 100)}%`;
+      if (state.rows.length) { updateGeometry(); renderRows(); }
+    }
+
+    function dimensions() {
+      return {rowHeight: Math.round(34 * state.scale), headerHeight: Math.round(42 * state.scale)};
+    }
+
+    function updateGeometry() {
+      if (!state.columns.length) return;
+      const {rowHeight, headerHeight} = dimensions();
+      const totalWidth = state.columns.reduce((sum, column) => sum + column.width, 0);
+      const canvasWidth = Math.max(totalWidth, els.gridShell.clientWidth - 2);
+      els.gridCanvas.style.width = `${canvasWidth}px`;
+      els.gridCanvas.style.height = `${headerHeight + state.filteredRows.length * rowHeight}px`;
+      els.gridHeader.style.width = `${canvasWidth}px`;
+      els.rowsLayer.style.top = `${headerHeight}px`;
+      els.rowsLayer.style.width = `${canvasWidth}px`;
+      els.rowsLayer.style.height = `${state.filteredRows.length * rowHeight}px`;
+    }
+
+    function renderRows() {
+      const token = ++state.renderToken;
+      requestAnimationFrame(() => {
+        if (token !== state.renderToken || !state.columns.length) return;
+        const {rowHeight, headerHeight} = dimensions();
+        const first = Math.max(0, Math.floor(Math.max(0, els.gridShell.scrollTop - headerHeight) / rowHeight) - OVERSCAN);
+        const visibleCount = Math.ceil(els.gridShell.clientHeight / rowHeight) + OVERSCAN * 2;
+        const end = Math.min(state.filteredRows.length, first + visibleCount);
+        const fragment = document.createDocumentFragment();
+        const template = gridTemplate(), offsets = frozenOffsets();
+        for (let index = first; index < end; index += 1) {
+          const row = state.filteredRows[index];
+          const element = document.createElement("div"); element.className = "grid-row"; element.role = "row";
+          element.style.top = `${index * rowHeight}px`; element.style.height = `${rowHeight}px`;
+          element.style.gridTemplateColumns = template; element.style.width = els.rowsLayer.style.width;
+          for (const column of state.columns) {
+            const cell = document.createElement("div"); cell.className = "grid-cell"; cell.role = "cell";
+            const raw = row[column.key]; const formatted = formatValue(column.key, raw, row);
+            cell.textContent = formatted; cell.title = formatted;
+            if (isNumericColumn(column.key, raw)) cell.classList.add("numeric");
+            const numeric = toNumber(raw);
+            if ((column.key.includes("change") || column.key.includes("correction")) && Number.isFinite(numeric)) {
+              if (numeric > 0) cell.classList.add("positive");
+              else if (numeric < 0) cell.classList.add("negative");
+            }
+            if (column.key === "double_down_probability" && numeric >= .2) cell.classList.add("warning");
+            if (column.frozen) { cell.classList.add("frozen"); cell.style.left = `${offsets.get(column.key)}px`; }
+            element.append(cell);
+          }
+          fragment.append(element);
+        }
+        els.rowsLayer.replaceChildren(fragment);
+      });
+    }
+
+    function isNumericColumn(key, value) {
+      return NUMBER_HINTS.some(hint => key.toLowerCase().includes(hint)) && Number.isFinite(toNumber(value));
+    }
+
+    function formatValue(key, value, row) {
+      if (value === null || value === undefined || value === "") return "—";
+      if (key === "mmr_fields_visible") return toBoolean(value) === true ? "GC真实" : "模型估算";
+      if (key === "result") return String(value) === "Win" ? "胜" : String(value) === "Loss" ? "负" : String(value);
+      if (key.includes("probability") || key === "confidence_used" || key === "confidence_proxy") {
+        const number = toNumber(value); if (Number.isFinite(number)) return `${(number * 100).toFixed(number < .1 ? 1 : 0)}%`;
+      }
+      if (key === "expected_double_down_multiplier") {
+        const number = toNumber(value); if (Number.isFinite(number)) return `${number.toFixed(2)}×`;
+      }
+      if (key === "date_utc") {
+        const parsed = new Date(String(value)); if (!Number.isNaN(parsed.valueOf())) return parsed.toISOString().replace("T", " ").replace(".000Z", "Z");
+      }
+      const number = toNumber(value);
+      if (Number.isFinite(number) && (key.toLowerCase().includes("mmr") || key.includes("rank_change") || key.includes("curve_mmr"))) return Number.isInteger(number) ? number.toLocaleString() : number.toFixed(1);
+      if (key === "match_id") return String(value);
+      if (key === "double_down_status" && row.mmr_fields_visible === false) return String(value);
+      return String(value);
+    }
+
+    function serializeCsv(rows, columns) {
+      const escape = value => {
+        const text = String(value ?? "");
+        return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+      };
+      return "\uFEFF" + [columns.map(column => escape(column.key)).join(","), ...rows.map(row => columns.map(column => escape(row[column.key])).join(","))].join("\r\n");
+    }
+
+    function downloadBlob(content, type, name) {
+      const url = URL.createObjectURL(new Blob([content], {type}));
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function exportFilteredCsv() {
+      const base = state.fileName.replace(/\.[^.]+$/, "") || "mmr-data";
+      downloadBlob(serializeCsv(state.filteredRows, state.columns), "text/csv;charset=utf-8", `${base}-filtered.csv`);
+    }
+
+    function exportStandaloneHtml() {
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelector("#gridHeader").replaceChildren(); clone.querySelector("#rowsLayer").replaceChildren();
+      clone.querySelector("#chartSvg").replaceChildren(); clone.querySelector("#chartTooltip").replaceChildren();
+      clone.querySelector("#columnPicker").replaceChildren(); clone.querySelector("#emptyState").classList.remove("hidden");
+      const embedded = document.createElement("script"); embedded.id = "embedded-dataset"; embedded.type = "application/json";
+      embedded.textContent = JSON.stringify({schema_version: 1, fileName: state.fileName, metadata: state.metadata, rows: state.rows}).replaceAll("<" + "/script", "<\\/script");
+      clone.querySelector("#viewer-script").before(embedded);
+      const html = "<!doctype html>\n" + clone.outerHTML;
+      const account = state.metadata.account_id ? `-${state.metadata.account_id}` : "";
+      downloadBlob(html, "text/html;charset=utf-8", `mmr-table${account}.html`);
+    }
+
+    function setStatus(message) { els.status.textContent = message; }
+
+    function bindEvents() {
+      els.openButton.addEventListener("click", () => els.fileInput.click());
+      els.fileInput.addEventListener("change", async () => {
+        const file = els.fileInput.files?.[0]; if (!file) return;
+        try { await loadFile(file); } catch (error) { setStatus(`加载失败：${error.message}`); }
+        finally { els.fileInput.value = ""; }
+      });
+      for (const type of ["dragenter", "dragover"]) els.dropZone.addEventListener(type, event => { event.preventDefault(); els.dropZone.classList.add("dragging"); });
+      for (const type of ["dragleave", "drop"]) els.dropZone.addEventListener(type, event => { event.preventDefault(); els.dropZone.classList.remove("dragging"); });
+      els.dropZone.addEventListener("drop", async event => {
+        const file = event.dataTransfer?.files?.[0]; if (!file) return;
+        try { await loadFile(file); } catch (error) { setStatus(`加载失败：${error.message}`); }
+      });
+      els.restoreButton.addEventListener("click", async () => {
+        const cached = await readCachedDataset();
+        if (cached) await setDataset(cached, {cache: false});
+      });
+      els.clearCacheButton.addEventListener("click", () => clearCache().catch(error => setStatus(`清除失败：${error.message}`)));
+      els.exportCsvButton.addEventListener("click", exportFilteredCsv);
+      els.exportHtmlButton.addEventListener("click", exportStandaloneHtml);
+      els.searchInput.addEventListener("input", scheduleFilters);
+      for (const element of [els.sourceFilter, els.resultFilter, els.segmentFilter, els.ddFilter]) element.addEventListener("change", applyFilters);
+      els.resetFiltersButton.addEventListener("click", resetFilters);
+      els.scaleInput.addEventListener("input", () => { state.scale = Number(els.scaleInput.value); applyScale(); saveSettings(); });
+      els.chartActualToggle.addEventListener("change", renderChart);
+      els.chartModeledToggle.addEventListener("change", renderChart);
+      els.chartZoomInButton.addEventListener("click", () => zoomChart(.72));
+      els.chartZoomOutButton.addEventListener("click", () => zoomChart(1.38));
+      els.chartFitButton.addEventListener("click", fitChart);
+      els.chartFullscreenButton.addEventListener("click", async () => {
+        if (document.fullscreenElement) await document.exitFullscreen(); else await els.chartSection.requestFullscreen();
+      });
+      els.chartViewport.addEventListener("wheel", event => {
+        if (!state.chart.layout || !state.chart.viewX) return;
+        event.preventDefault();
+        const rect = els.chartViewport.getBoundingClientRect(), {plot} = state.chart.layout;
+        const anchorX = Math.max(0, Math.min(1, (event.clientX - rect.left - plot.left) / plot.width));
+        const anchorY = Math.max(0, Math.min(1, (event.clientY - rect.top - plot.top) / plot.height));
+        zoomChart(event.deltaY > 0 ? 1.18 : 1 / 1.18, anchorX, anchorY, event.ctrlKey ? "y" : "x");
+      }, {passive: false});
+      els.chartViewport.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || !state.chart.layout || !state.chart.viewX) return;
+        const rect = els.chartViewport.getBoundingClientRect(), {plot} = state.chart.layout;
+        const x = event.clientX - rect.left, y = event.clientY - rect.top;
+        if (x < plot.left || x > plot.right || y < plot.top || y > plot.bottom) return;
+        state.chart.drag = {x: event.clientX, y: event.clientY, viewX: [...state.chart.viewX], viewY: [...state.chart.viewY]};
+        els.chartViewport.classList.add("dragging"); els.chartViewport.setPointerCapture(event.pointerId); hideChartTooltip();
+      });
+      els.chartViewport.addEventListener("pointermove", event => {
+        if (!state.chart.drag || !state.chart.layout) { showChartTooltip(event); return; }
+        const {plot} = state.chart.layout, drag = state.chart.drag;
+        const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+        const xSpan = drag.viewX[1] - drag.viewX[0], ySpan = drag.viewY[1] - drag.viewY[0];
+        state.chart.viewX = clampDomain([drag.viewX[0] - dx / plot.width * xSpan, drag.viewX[1] - dx / plot.width * xSpan], state.chart.fullX, 3_600_000);
+        state.chart.viewY = clampDomain([drag.viewY[0] + dy / plot.height * ySpan, drag.viewY[1] + dy / plot.height * ySpan], state.chart.fullY, 10);
+        renderChart();
+      });
+      const finishChartDrag = event => {
+        if (!state.chart.drag) return;
+        state.chart.drag = null; els.chartViewport.classList.remove("dragging");
+        if (els.chartViewport.hasPointerCapture(event.pointerId)) els.chartViewport.releasePointerCapture(event.pointerId);
+        showChartTooltip(event);
+      };
+      els.chartViewport.addEventListener("pointerup", finishChartDrag);
+      els.chartViewport.addEventListener("pointercancel", finishChartDrag);
+      els.chartViewport.addEventListener("pointerleave", () => { if (!state.chart.drag) hideChartTooltip(); });
+      els.chartViewport.addEventListener("dblclick", event => { event.preventDefault(); fitChart(); });
+      els.fullscreenButton.addEventListener("click", async () => {
+        if (document.fullscreenElement) await document.exitFullscreen(); else await els.gridShell.requestFullscreen();
+      });
+      document.addEventListener("fullscreenchange", () => {
+        els.fullscreenButton.textContent = document.fullscreenElement === els.gridShell ? "退出全屏" : "全屏表格";
+        els.chartFullscreenButton.textContent = document.fullscreenElement === els.chartSection ? "退出全屏" : "图表全屏";
+        updateGeometry(); renderRows(); renderChart();
+      });
+      els.gridShell.addEventListener("scroll", renderRows, {passive: true});
+      new ResizeObserver(() => { updateGeometry(); renderRows(); }).observe(els.gridShell);
+      new ResizeObserver(renderChart).observe(els.chartViewport);
+      document.addEventListener("click", event => { if (!els.columnDetails.contains(event.target)) els.columnDetails.open = false; });
+    }
+
+    async function initialize() {
+      loadSettings(); bindEvents();
+      const embedded = document.getElementById("embedded-dataset");
+      if (embedded) {
+        try {
+          const payload = JSON.parse(embedded.textContent);
+          await setDataset({fileName: payload.fileName || "embedded-data.json", rows: payload.rows, metadata: payload.metadata || {}}, {cache: false});
+          setStatus("已加载独立 HTML 内嵌数据");
+        } catch (error) { setStatus(`内嵌数据错误：${error.message}`); }
+      }
+      const cached = await readCachedDataset();
+      els.restoreButton.disabled = !cached; els.clearCacheButton.disabled = !cached;
+    }
+
+    initialize();
+  })();
+  </script>
+</body>
+</html>
