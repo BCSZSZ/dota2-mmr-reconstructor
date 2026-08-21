@@ -25,8 +25,8 @@ internal sealed class CollectorSetupWindow : Form
     {
         Text = "Dota 2 MMR 曲线生成器";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(680, 480);
-        MinimumSize = new Size(640, 460);
+        ClientSize = new Size(720, 540);
+        MinimumSize = new Size(680, 520);
         Font = new Font("Microsoft YaHei UI", 10);
         FormBorderStyle = FormBorderStyle.Sizable;
 
@@ -44,7 +44,7 @@ internal sealed class CollectorSetupWindow : Form
             Text = "Steam ID 可以留空，扫码后会自动识别。填写 ID32 或 SteamID64 可防止扫错账号。\n" +
                    "场数是 GC 全部历史行数（含普通局），下载后才筛出天梯；运行前请完全退出 Dota 2。",
             Dock = DockStyle.Top,
-            Height = 64,
+            Height = 78,
             Padding = new Padding(24, 4, 24, 4),
             ForeColor = Color.DimGray,
             TextAlign = ContentAlignment.MiddleLeft,
@@ -122,8 +122,10 @@ internal sealed class CollectorSetupWindow : Form
         formGrid.SetColumnSpan(reconstructionCheck, 2);
         var outputExplanation = new Label
         {
-            Text = "结果会写入：输出根目录\\自动识别的 ID32\\\n" +
-                   "其中 gc-collection.json 是不可变的原始输入，mmr-reconstruction\\ 是模型输出。",
+            Text = "建议使用上面的默认目录，并在以后运行时始终保持同一个固定根目录。\n" +
+                   "不要进入或选择某个 SteamID 子文件夹：扫码后程序会自动创建/识别 <ID32>\\。\n" +
+                   "发现既存 gc-match-history-cache.json 时会自动补最新比赛，并从最老断点继续。\n" +
+                   "gc-collection.json 是原始输入；模型结果单独写入 mmr-reconstruction\\。",
             ForeColor = Color.DimGray,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
