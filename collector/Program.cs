@@ -119,7 +119,8 @@ internal static class Program
         }
         catch (Exception exception) when (
             exception is IOException or JsonException or InvalidDataException
-            or UnauthorizedAccessException or InvalidOperationException)
+            or UnauthorizedAccessException or InvalidOperationException
+            or System.Runtime.InteropServices.ExternalException)
         {
             reconstructionError = $"C# 曲线生成失败：{exception.Message}";
             Console.Error.WriteLine(reconstructionError);
@@ -135,7 +136,7 @@ internal static class Program
             ? $"输出根目录：{options.OutputRoot}（扫码后按账号创建子目录）"
             : $"原始输出：{options.OutputPath}");
         Console.WriteLine(options.GenerateReconstruction
-            ? "下载后：使用 C# 生成完整 CSV/JSON/SVG/HTML。"
+            ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/SVG/PNG/HTML。"
             : "下载后：仅保留原始 GC 数据。 ");
         Console.WriteLine();
 
@@ -1010,7 +1011,8 @@ internal static class Program
             }
             catch (Exception exception) when (
                 exception is IOException or JsonException or InvalidDataException
-                or UnauthorizedAccessException or InvalidOperationException)
+                or UnauthorizedAccessException or InvalidOperationException
+                or System.Runtime.InteropServices.ExternalException)
             {
                 reconstructionError =
                     $"原始 GC 数据已经安全保存，但 C# 曲线生成失败：{exception.Message}";

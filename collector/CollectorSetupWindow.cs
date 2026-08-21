@@ -278,7 +278,7 @@ internal static class CompletionDialog
                 : "原始 GC 数据下载已经完成。\n\n") +
             $"输出目录：{outputDirectory}\n\n" +
             (generatedReconstruction
-                ? "点击“是”打开输出目录；可以直接双击 mmr-history.html。"
+                ? "点击“是”打开输出目录；可直接查看 PNG、英雄贡献 TXT，或双击交互 HTML。"
                 : "点击“是”打开输出目录。"),
             "Dota 2 MMR 曲线生成器",
             MessageBoxButtons.YesNo,

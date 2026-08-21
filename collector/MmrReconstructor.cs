@@ -1,3 +1,7 @@
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -56,6 +60,8 @@ internal static class MmrReconstructor
         var estimatesPath = Path.Combine(outputDirectory, "match-estimates.csv");
         var curvePath = Path.Combine(outputDirectory, "complete-mmr-curve.csv");
         var svgPath = Path.Combine(outputDirectory, "complete-mmr-curve.svg");
+        var pngPath = Path.Combine(outputDirectory, "complete-mmr-curve.png");
+        var heroReportPath = Path.Combine(outputDirectory, "hero-mmr-contribution.txt");
         var segmentsPath = Path.Combine(outputDirectory, "hidden-segments.csv");
         var datasetPath = Path.Combine(outputDirectory, "mmr-dataset.json");
         var htmlPath = Path.Combine(outputDirectory, "mmr-history.html");
@@ -151,6 +157,8 @@ internal static class MmrReconstructor
             DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         });
         WriteSvg(svgPath, source.AccountId, rows);
+        WritePng(pngPath, source.AccountId, rows);
+        WriteHeroContributionReport(heroReportPath, source.AccountId, rows);
         WriteStandaloneHtml(htmlPath, dataset, source.AccountId);
 
         var manifestPath = Path.Combine(
@@ -158,7 +166,8 @@ internal static class MmrReconstructor
             "reconstruction-manifest.json");
         var outputPaths = new[]
         {
-            summaryPath, estimatesPath, curvePath, svgPath, segmentsPath, datasetPath, htmlPath,
+            summaryPath, estimatesPath, curvePath, svgPath, pngPath, heroReportPath,
+            segmentsPath, datasetPath, htmlPath,
         };
         WriteJsonAtomically(manifestPath, new Dictionary<string, object?>
         {
@@ -1072,6 +1081,277 @@ internal static class MmrReconstructor
         WriteTextAtomically(path, svg, new UTF8Encoding(false));
     }
 
+    private static void WritePng(
+        string path,
+        uint accountId,
+        IReadOnlyList<Dictionary<string, object?>> rows)
+    {
+        const int width = 2300;
+        const int height = 1250;
+        const float left = 156;
+        const float right = 24;
+        const float top = 142;
+        const float bottom = 88;
+        var plotWidth = width - left - right;
+        var plotHeight = height - top - bottom;
+        var times = rows
+            .Select(row => Convert.ToInt64(row["unix_time"], CultureInfo.InvariantCulture))
+            .ToArray();
+        var values = rows
+            .Select(row => Convert.ToInt32(row["curve_mmr_after"], CultureInfo.InvariantCulture))
+            .ToArray();
+        var firstMmr = Convert.ToInt32(rows[0]["curve_mmr_before"], CultureInfo.InvariantCulture);
+        var minTime = times.Min();
+        var maxTime = Math.Max(minTime + 1, times.Max());
+        var valueMin = Math.Min(firstMmr, values.Min());
+        var valueMax = Math.Max(firstMmr, values.Max());
+        var valueSpan = Math.Max(valueMax - valueMin, 100);
+        var tickStep = Math.Max(50, (int)Math.Ceiling(valueSpan / 7.0 / 50.0) * 50);
+        var axisMin = (int)Math.Floor((valueMin - tickStep / 2.0) / tickStep) * tickStep;
+        var axisMax = (int)Math.Ceiling((valueMax + tickStep / 2.0) / tickStep) * tickStep;
+        if (axisMax <= axisMin)
+        {
+            axisMax = axisMin + tickStep;
+        }
+
+        float X(long unixTime) => left
+            + (float)((unixTime - minTime) / (double)(maxTime - minTime) * plotWidth);
+        float Y(int mmr) => top
+            + (float)((axisMax - mmr) / (double)(axisMax - axisMin) * plotHeight);
+
+        using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        bitmap.SetResolution(144, 144);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        graphics.Clear(Color.White);
+
+        var textColor = Color.FromArgb(31, 35, 40);
+        var mutedColor = Color.FromArgb(87, 96, 106);
+        var gridColor = Color.FromArgb(216, 222, 228);
+        var borderColor = Color.FromArgb(140, 149, 159);
+        var actualColor = Color.FromArgb(9, 105, 218);
+        var modeledColor = Color.FromArgb(45, 164, 78);
+        var doubleDownColor = Color.FromArgb(191, 135, 0);
+        using var titleFont = new Font("Segoe UI", 40, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var subtitleFont = new Font("Segoe UI", 25, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var labelFont = new Font("Segoe UI", 23, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var finalFont = new Font("Segoe UI", 25, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var gridPen = new Pen(gridColor, 1.5f);
+        using var borderPen = new Pen(borderColor, 1.5f);
+        using var actualPen = new Pen(actualColor, 3.2f);
+        using var modeledPen = new Pen(modeledColor, 3.2f)
+        {
+            DashStyle = DashStyle.Dash,
+        };
+        using var doubleDownBrush = new SolidBrush(doubleDownColor);
+        using var textBrush = new SolidBrush(textColor);
+        using var mutedBrush = new SolidBrush(mutedColor);
+        using var whitePen = new Pen(Color.White, 2);
+
+        var modeledCount = rows.Count(row => GetBoolean(row, "mmr_fields_visible") is false);
+        var start = DateTimeOffset.FromUnixTimeSeconds(minTime);
+        var end = DateTimeOffset.FromUnixTimeSeconds(maxTime);
+        graphics.DrawString(
+            $"Account {accountId} · MMR reconstruction",
+            titleFont,
+            textBrush,
+            left,
+            8);
+        graphics.DrawString(
+            $"{start:yyyy-MM} to {end:yyyy-MM} · {rows.Count:N0} ranked matches · "
+            + $"{rows.Count - modeledCount:N0} GC actual · {modeledCount:N0} endpoint-constrained",
+            subtitleFont,
+            mutedBrush,
+            left,
+            66);
+
+        using var rightAligned = new StringFormat
+        {
+            Alignment = StringAlignment.Far,
+            LineAlignment = StringAlignment.Center,
+        };
+        for (var tick = axisMin; tick <= axisMax; tick += tickStep)
+        {
+            var y = Y(tick);
+            graphics.DrawLine(gridPen, left, y, left + plotWidth, y);
+            graphics.DrawString(
+                tick.ToString("N0", CultureInfo.InvariantCulture),
+                labelFont,
+                textBrush,
+                new RectangleF(0, y - 18, left - 22, 36),
+                rightAligned);
+        }
+
+        const int xTickCount = 7;
+        using var centered = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near,
+        };
+        using var leftAligned = new StringFormat
+        {
+            Alignment = StringAlignment.Near,
+            LineAlignment = StringAlignment.Near,
+        };
+        for (var index = 0; index < xTickCount; index++)
+        {
+            var ratio = index / (double)(xTickCount - 1);
+            var unixTime = minTime + (long)Math.Round((maxTime - minTime) * ratio);
+            var x = X(unixTime);
+            graphics.DrawLine(borderPen, x, top + plotHeight, x, top + plotHeight + 7);
+            var labelBounds = index switch
+            {
+                0 => new RectangleF(x, top + plotHeight + 14, 180, 35),
+                xTickCount - 1 => new RectangleF(x - 180, top + plotHeight + 14, 180, 35),
+                _ => new RectangleF(x - 90, top + plotHeight + 14, 180, 35),
+            };
+            graphics.DrawString(
+                DateTimeOffset.FromUnixTimeSeconds(unixTime).ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                labelFont,
+                textBrush,
+                labelBounds,
+                index == 0 ? leftAligned : index == xTickCount - 1 ? rightAligned : centered);
+        }
+
+        graphics.DrawRectangle(borderPen, left, top, plotWidth, plotHeight);
+        var previousX = left;
+        var previousY = Y(firstMmr);
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var x = X(times[index]);
+            var y = Y(values[index]);
+            var modeled = GetBoolean(row, "mmr_fields_visible") is false;
+            var pen = modeled ? modeledPen : actualPen;
+            graphics.DrawLine(pen, previousX, previousY, x, previousY);
+            graphics.DrawLine(pen, x, previousY, x, y);
+            if (modeled
+                && row["double_down_probability"] is not null
+                && Convert.ToDouble(row["double_down_probability"], CultureInfo.InvariantCulture) >= 0.20)
+            {
+                graphics.FillEllipse(doubleDownBrush, x - 4.5f, y - 4.5f, 9, 9);
+                graphics.DrawEllipse(whitePen, x - 4.5f, y - 4.5f, 9, 9);
+            }
+            previousX = x;
+            previousY = y;
+        }
+
+        var finalValue = values[^1];
+        graphics.DrawString(
+            finalValue.ToString("N0", CultureInfo.InvariantCulture),
+            finalFont,
+            textBrush,
+            new RectangleF(left + plotWidth - 170, Y(finalValue) - 42, 155, 38),
+            rightAligned);
+
+        var savedState = graphics.Save();
+        graphics.TranslateTransform(28, top + plotHeight / 2);
+        graphics.RotateTransform(-90);
+        graphics.DrawString("MMR", labelFont, textBrush, 0, 0, centered);
+        graphics.Restore(savedState);
+
+        var legendY = height - 31;
+        graphics.DrawLine(actualPen, left, legendY, left + 46, legendY);
+        graphics.DrawString("GC actual", labelFont, textBrush, left + 60, legendY - 17);
+        graphics.DrawLine(modeledPen, left + 250, legendY, left + 296, legendY);
+        graphics.DrawString("Endpoint constrained", labelFont, textBrush, left + 310, legendY - 17);
+        graphics.FillEllipse(doubleDownBrush, left + 630, legendY - 5, 10, 10);
+        graphics.DrawString("DD probability ≥20%", labelFont, textBrush, left + 653, legendY - 17);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            bitmap.Save(temporary, ImageFormat.Png);
+            File.Move(temporary, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    private static void WriteHeroContributionReport(
+        string path,
+        uint accountId,
+        IReadOnlyList<Dictionary<string, object?>> rows)
+    {
+        var contributions = rows
+            .GroupBy(row => Convert.ToInt32(row["hero_id"], CultureInfo.InvariantCulture))
+            .Select(group =>
+            {
+                var actual = group.Where(row => GetBoolean(row, "mmr_fields_visible") is true).ToList();
+                var fitted = group.Where(row => GetBoolean(row, "mmr_fields_visible") is false).ToList();
+                return new HeroContribution(
+                    group.Key,
+                    HeroNames.Get(group.Key),
+                    group.Count(),
+                    group.Count(row => string.Equals(row["result"] as string, "Win", StringComparison.Ordinal)),
+                    group.Count(row => string.Equals(row["result"] as string, "Loss", StringComparison.Ordinal)),
+                    group.Sum(RankChange),
+                    actual.Count,
+                    actual.Sum(RankChange),
+                    fitted.Count,
+                    fitted.Sum(RankChange));
+            })
+            .OrderByDescending(item => item.TotalContribution)
+            .ThenByDescending(item => item.Matches)
+            .ThenBy(item => item.HeroName, StringComparer.Ordinal)
+            .ToList();
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Dota 2 MMR 英雄贡献统计");
+        builder.AppendLine($"账号 ID32：{accountId}");
+        builder.AppendLine($"区间：{rows[0]["date_utc"]} 至 {rows[^1]["date_utc"]}");
+        builder.AppendLine($"天梯比赛：{rows.Count:N0}；出现英雄：{contributions.Count:N0}");
+        builder.AppendLine(
+            $"总贡献：{Signed(contributions.Sum(item => item.TotalContribution))} MMR；"
+            + $"GC 真实：{Signed(contributions.Sum(item => item.ActualContribution))}；"
+            + $"低置信度拟合：{Signed(contributions.Sum(item => item.FittedContribution))}");
+        builder.AppendLine();
+        builder.AppendLine("口径说明：");
+        builder.AppendLine("1. 按总 MMR 贡献从高到低排列，只统计该账号在曲线区间内实际使用过的英雄。");
+        builder.AppendLine("2. GC 真实比赛使用服务器返回的 Rank Change；隐藏比赛使用端点约束后的拟合 Rank Change。");
+        builder.AppendLine("3. 校准、轨道切换或观测断层产生的 anchor_jump_before 不属于任何单场比赛，因此不归因给英雄。");
+        builder.AppendLine("4. 英雄英文名来自内置 OpenDota dotaconstants 快照；Hero ID 始终保留，未知新英雄不会丢失。");
+        builder.AppendLine();
+        builder.AppendLine(
+            "排名\t英雄\tHero ID\t场次\t胜\t负\t胜率\t总MMR贡献\t场均贡献\tGC真实场次\tGC真实贡献\t拟合场次\t拟合贡献");
+        for (var index = 0; index < contributions.Count; index++)
+        {
+            var item = contributions[index];
+            var winRate = item.Matches == 0 ? 0 : item.Wins / (double)item.Matches;
+            var average = item.Matches == 0 ? 0 : item.TotalContribution / (double)item.Matches;
+            builder.Append(index + 1).Append('\t')
+                .Append(item.HeroName).Append('\t')
+                .Append(item.HeroId).Append('\t')
+                .Append(item.Matches).Append('\t')
+                .Append(item.Wins).Append('\t')
+                .Append(item.Losses).Append('\t')
+                .Append(winRate.ToString("0.0%", CultureInfo.InvariantCulture)).Append('\t')
+                .Append(Signed(item.TotalContribution)).Append('\t')
+                .Append(Signed(average, "0.00")).Append('\t')
+                .Append(item.ActualMatches).Append('\t')
+                .Append(Signed(item.ActualContribution)).Append('\t')
+                .Append(item.FittedMatches).Append('\t')
+                .Append(Signed(item.FittedContribution)).AppendLine();
+        }
+        WriteTextAtomically(path, builder.ToString(), new UTF8Encoding(true));
+
+        static int RankChange(Dictionary<string, object?> row) =>
+            Convert.ToInt32(row["modeled_rank_change"], CultureInfo.InvariantCulture);
+    }
+
+    private static string Signed(int value) => value.ToString("+0;-0;0", CultureInfo.InvariantCulture);
+
+    private static string Signed(double value, string digits) =>
+        value.ToString($"+{digits};-{digits};{digits}", CultureInfo.InvariantCulture);
+
     private static void WriteHiddenSegmentsCsv(
         string path,
         IReadOnlyList<Dictionary<string, object?>> rows)
@@ -1305,3 +1585,15 @@ internal sealed record DoubleDownFit(
     double EffectiveDoubleDowns,
     int ProbableDoubleDowns,
     bool FallbackUsed);
+
+internal sealed record HeroContribution(
+    int HeroId,
+    string HeroName,
+    int Matches,
+    int Wins,
+    int Losses,
+    int TotalContribution,
+    int ActualMatches,
+    int ActualContribution,
+    int FittedMatches,
+    int FittedContribution);

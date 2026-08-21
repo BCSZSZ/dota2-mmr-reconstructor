@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-08-21
+
+- Add a 2300x1250 shareable PNG rendering of the complete reconstructed curve.
+- Add a hero MMR contribution report, sorted from highest to lowest net contribution.
+- Separate actual GC contribution from endpoint-constrained fitted contribution in the report.
+
 ## 0.2.1 - 2026-08-21
 
 - Explain the fixed output-root rule and automatic account subdirectories in the GUI.
