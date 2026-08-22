@@ -9,7 +9,7 @@ Windows 普通用户只需要运行 `Dota2MmrReconstructor.exe`。它会依次�
 2. 通过 Steam 二维码，或一次性用户名/密码与 Steam Guard 验证码登录；
    随后下载 Match History 与 Current Rank；
 3. 保留不可变的原始 GC JSON 和断点缓存；
-4. 使用内置 C# 模型生成 CSV、JSON、SVG 和独立 HTML；
+4. 使用内置 C# 模型生成 CSV、JSON、TXT、Markdown、XLSX、SVG、PNG 和独立 HTML；
 5. 用户直接双击 `mmr-history.html`，即可缩放、拖动和筛选曲线。
 
 不需要安装 Python、uv、Node.js，也不需要安装浏览器插件。Python 版本继续保留为模型的
@@ -104,6 +104,8 @@ GUI 中应选择 `E:\Dota2MmrData`，而不是选择 `E:\Dota2MmrData\123456789`
     ├── complete-mmr-curve.svg
     ├── complete-mmr-curve.png           # 适合直接查看和转发的静态大图
     ├── hero-mmr-contribution.txt        # 英雄 MMR 净贡献，从正到负
+    ├── hero-mmr-contribution.md         # 同口径 Markdown 报告
+    ├── hero-mmr-contribution.xlsx       # 可筛选、排序和计算的 Excel 工作簿
     ├── hidden-segments.csv
     ├── mmr-dataset.json
     └── mmr-history.html                # 直接双击打开
@@ -113,11 +115,13 @@ GUI 中应选择 `E:\Dota2MmrData`，而不是选择 `E:\Dota2MmrData\123456789`
 曲线支持滚轮缩放时间轴、`Ctrl + 滚轮`缩放 MMR、拖动平移、双击复位、悬停详情、筛选、
 虚拟滚动表格和筛选结果导出。
 
-`hero-mmr-contribution.txt` 汇总曲线区间内使用过的全部英雄，按 MMR 净贡献从高到低
-排列。GC 可见比赛采用真实 Rank Change；低于 30% Confidence 的隐藏比赛采用端点约束后的
-拟合 Rank Change，并分别列出真实与拟合的场数和贡献。校准或轨道切换产生的锚点跳变不属于
-任何一场比赛，因此不归因给英雄。`complete-mmr-curve.png` 是 2300×1250 的静态概览图；
-需要缩放、拖动或逐场检查时仍使用 HTML。
+三个 `hero-mmr-contribution` 文件汇总曲线区间内使用过的全部英雄，按 MMR 净贡献从高到低
+排列。TXT 保持 v0.4.0 的原始格式；Markdown 适合网页或聊天转发；XLSX 包含“英雄贡献”和
+“说明”两个工作表，表格使用真正的数字单元格，并支持冻结表头、筛选、排序和计算。GC 可见
+比赛采用真实 Rank Change；低于 30% Confidence 的隐藏比赛采用端点约束后的拟合 Rank
+Change，并分别列出真实与拟合的场数和贡献。校准或轨道切换产生的锚点跳变不属于任何一场
+比赛，因此不归因给英雄。`complete-mmr-curve.png` 是 2300×1250 的静态概览图；需要缩放、
+拖动或逐场检查时仍使用 HTML。
 
 ## 命令行用法
 

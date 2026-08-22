@@ -11,7 +11,8 @@
 3. 在设置窗口输入目标场数、可选 Steam ID 和输出目录；
 4. 使用默认二维码登录；如果手机没有扫码功能，可选择用户名/密码模式，并在程序随后弹出的
    窗口输入当前五位 Steam Guard 验证码；
-5. 完成后打开输出目录：直接看 PNG/TXT，或双击 `mmr-reconstruction\mmr-history.html`。
+5. 完成后打开输出目录：直接看 PNG、TXT、Markdown、Excel，或双击
+   `mmr-reconstruction\mmr-history.html`。
 
 Steam ID 可以留空自动识别，也可填写 ID32 或 SteamID64 防止扫错账号。默认扫描
 5,000 条 GC 历史，建议单次目标不超过 10,000。GC 请求不能在服务端只筛天梯，因此目标数
@@ -60,8 +61,9 @@ Steam ID 可以留空自动识别，也可填写 ID32 或 SteamID64 防止扫错
 
 凭据登录仅在 GUI 提供，不支持通过命令行传入密码或 OTP，以免泄露到命令历史或进程列表。
 
-曲线目录还会生成 `complete-mmr-curve.png` 静态大图，以及
-`hero-mmr-contribution.txt`。英雄贡献按净 MMR 从高到低排列，GC 真实变化和低置信度
-端点拟合变化都会计入，并分列显示。
+曲线目录还会生成 `complete-mmr-curve.png` 静态大图，以及内容一致的
+`hero-mmr-contribution.txt`、`.md` 和 `.xlsx`。英雄贡献按净 MMR 从高到低排列，GC
+真实变化和低置信度端点拟合变化都会计入，并分列显示。Excel 版本包含冻结表头、自动筛选
+和真正的数字单元格，可在 Excel/WPS 中继续排序和计算。
 
 本包依赖 .NET 8 Desktop Runtime。请完整解压 ZIP 并保留附带的 DLL。

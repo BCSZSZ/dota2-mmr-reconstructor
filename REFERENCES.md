@@ -40,5 +40,8 @@ ShowMMR reference revision used during development:
 - [QRCoder](https://github.com/codebude/QRCoder), MIT, renders the Steam login QR code.
 - [protobuf-net](https://github.com/protobuf-net/protobuf-net), Apache-2.0, is used transitively
   by SteamKit2.
+- [ClosedXML](https://github.com/ClosedXML/ClosedXML), MIT, writes the typed and filterable
+  hero-contribution XLSX report. Its redistributed runtime dependencies are listed in
+  `collector/THIRD_PARTY_NOTICES.md`.
 
 See `collector/THIRD_PARTY_NOTICES.md` for the collector release notices.

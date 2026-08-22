@@ -62,6 +62,8 @@ internal static class MmrReconstructor
         var svgPath = Path.Combine(outputDirectory, "complete-mmr-curve.svg");
         var pngPath = Path.Combine(outputDirectory, "complete-mmr-curve.png");
         var heroReportPath = Path.Combine(outputDirectory, "hero-mmr-contribution.txt");
+        var heroMarkdownPath = Path.Combine(outputDirectory, "hero-mmr-contribution.md");
+        var heroWorkbookPath = Path.Combine(outputDirectory, "hero-mmr-contribution.xlsx");
         var segmentsPath = Path.Combine(outputDirectory, "hidden-segments.csv");
         var datasetPath = Path.Combine(outputDirectory, "mmr-dataset.json");
         var htmlPath = Path.Combine(outputDirectory, "mmr-history.html");
@@ -158,7 +160,10 @@ internal static class MmrReconstructor
         });
         WriteSvg(svgPath, source.AccountId, rows);
         WritePng(pngPath, source.AccountId, rows);
-        WriteHeroContributionReport(heroReportPath, source.AccountId, rows);
+        var heroReport = BuildHeroContributionReport(source.AccountId, rows);
+        WriteHeroContributionReport(heroReportPath, heroReport);
+        HeroContributionSupplementaryReports.WriteMarkdown(heroMarkdownPath, heroReport);
+        HeroContributionSupplementaryReports.WriteWorkbook(heroWorkbookPath, heroReport);
         WriteStandaloneHtml(htmlPath, dataset, source.AccountId);
 
         var manifestPath = Path.Combine(
@@ -167,6 +172,7 @@ internal static class MmrReconstructor
         var outputPaths = new[]
         {
             summaryPath, estimatesPath, curvePath, svgPath, pngPath, heroReportPath,
+            heroMarkdownPath, heroWorkbookPath,
             segmentsPath, datasetPath, htmlPath,
         };
         WriteJsonAtomically(manifestPath, new Dictionary<string, object?>
@@ -1276,8 +1282,7 @@ internal static class MmrReconstructor
         }
     }
 
-    private static void WriteHeroContributionReport(
-        string path,
+    private static HeroContributionReport BuildHeroContributionReport(
         uint accountId,
         IReadOnlyList<Dictionary<string, object?>> rows)
     {
@@ -1304,11 +1309,25 @@ internal static class MmrReconstructor
             .ThenBy(item => item.HeroName, StringComparer.Ordinal)
             .ToList();
 
+        return new HeroContributionReport(
+            accountId,
+            Convert.ToString(rows[0]["date_utc"], CultureInfo.InvariantCulture)!,
+            Convert.ToString(rows[^1]["date_utc"], CultureInfo.InvariantCulture)!,
+            rows.Count,
+            contributions);
+
+        static int RankChange(Dictionary<string, object?> row) =>
+            Convert.ToInt32(row["modeled_rank_change"], CultureInfo.InvariantCulture);
+    }
+
+    private static void WriteHeroContributionReport(string path, HeroContributionReport report)
+    {
+        var contributions = report.Contributions;
         var builder = new StringBuilder();
         builder.AppendLine("Dota 2 MMR 英雄贡献统计");
-        builder.AppendLine($"账号 ID32：{accountId}");
-        builder.AppendLine($"区间：{rows[0]["date_utc"]} 至 {rows[^1]["date_utc"]}");
-        builder.AppendLine($"天梯比赛：{rows.Count:N0}；出现英雄：{contributions.Count:N0}");
+        builder.AppendLine($"账号 ID32：{report.AccountId}");
+        builder.AppendLine($"区间：{report.StartUtc} 至 {report.EndUtc}");
+        builder.AppendLine($"天梯比赛：{report.Matches:N0}；出现英雄：{contributions.Count:N0}");
         builder.AppendLine(
             $"总贡献：{Signed(contributions.Sum(item => item.TotalContribution))} MMR；"
             + $"GC 真实：{Signed(contributions.Sum(item => item.ActualContribution))}；"
@@ -1342,9 +1361,6 @@ internal static class MmrReconstructor
                 .Append(Signed(item.FittedContribution)).AppendLine();
         }
         WriteTextAtomically(path, builder.ToString(), new UTF8Encoding(true));
-
-        static int RankChange(Dictionary<string, object?> row) =>
-            Convert.ToInt32(row["modeled_rank_change"], CultureInfo.InvariantCulture);
     }
 
     private static string Signed(int value) => value.ToString("+0;-0;0", CultureInfo.InvariantCulture);
@@ -1597,3 +1613,17 @@ internal sealed record HeroContribution(
     int ActualContribution,
     int FittedMatches,
     int FittedContribution);
+
+internal sealed record HeroContributionReport(
+    uint AccountId,
+    string StartUtc,
+    string EndUtc,
+    int Matches,
+    IReadOnlyList<HeroContribution> Contributions)
+{
+    public int TotalContribution => Contributions.Sum(item => item.TotalContribution);
+
+    public int ActualContribution => Contributions.Sum(item => item.ActualContribution);
+
+    public int FittedContribution => Contributions.Sum(item => item.FittedContribution);
+}

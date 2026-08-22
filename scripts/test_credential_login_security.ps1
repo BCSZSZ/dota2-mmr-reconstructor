@@ -14,8 +14,8 @@ if (-not (Test-Path -LiteralPath $assemblyPath) -or
 }
 
 $version = (Get-Item -LiteralPath $executablePath).VersionInfo.ProductVersion
-if (-not $version.StartsWith("0.4.0", [System.StringComparison]::Ordinal)) {
-    throw "Expected product version 0.4.0, got $version."
+if (-not $version.StartsWith("0.4.1", [System.StringComparison]::Ordinal)) {
+    throw "Expected product version 0.4.1, got $version."
 }
 
 $helpOutput = (& $executablePath --help | Out-String)
@@ -76,4 +76,4 @@ if ($setupSource -notmatch "UseSystemPasswordChar\s*=\s*true") {
     throw "The GUI password field is not masked."
 }
 
-Write-Output "PASS: v0.4.0 credentials are GUI-only, masked, ephemeral, and force OTP fallback."
+Write-Output "PASS: v0.4.1 credentials are GUI-only, masked, ephemeral, and force OTP fallback."

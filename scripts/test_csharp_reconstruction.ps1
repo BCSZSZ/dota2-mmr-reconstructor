@@ -31,6 +31,8 @@ $datasetPath = Join-Path $outputDirectory "mmr-dataset.json"
 $htmlPath = Join-Path $outputDirectory "mmr-history.html"
 $pngPath = Join-Path $outputDirectory "complete-mmr-curve.png"
 $heroReportPath = Join-Path $outputDirectory "hero-mmr-contribution.txt"
+$heroMarkdownPath = Join-Path $outputDirectory "hero-mmr-contribution.md"
+$heroWorkbookPath = Join-Path $outputDirectory "hero-mmr-contribution.xlsx"
 $manifestPath = Join-Path $testRoot "reconstruction-manifest.json"
 $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
 $dataset = Get-Content -LiteralPath $datasetPath -Raw | ConvertFrom-Json
@@ -80,10 +82,75 @@ if (-not (Select-String -LiteralPath $heroReportPath -SimpleMatch "拟合贡献"
 if (-not (Select-String -LiteralPath $heroReportPath -SimpleMatch "Medusa" -Quiet)) {
     throw "Hero contribution report did not resolve HeroId 94."
 }
+$expectedHeroReportHash = "68F512D64E7179E8B603411B9F48E8F4A0AFF579428DC499E5B14D03E5F03B0E"
+$heroReportHash = (Get-FileHash -LiteralPath $heroReportPath -Algorithm SHA256).Hash
+if ($heroReportHash -ne $expectedHeroReportHash) {
+    throw "TXT hero report changed from the byte-exact v0.4.0 output contract."
+}
 $heroReport = Get-Content -LiteralPath $heroReportPath -Raw -Encoding utf8
 if ($heroReport.IndexOf("Morphling", [System.StringComparison]::Ordinal) -gt
     $heroReport.IndexOf("Anti-Mage", [System.StringComparison]::Ordinal)) {
     throw "Hero contribution report is not sorted from positive to negative."
+}
+if (-not (Select-String -LiteralPath $heroMarkdownPath -SimpleMatch "|2|Medusa|94|" -Quiet)) {
+    throw "Markdown hero report is missing its table data."
+}
+
+$assemblyDirectory = Split-Path -Parent $executable
+$closedXmlDependencies = @(
+    "System.IO.Packaging.dll",
+    "DocumentFormat.OpenXml.Framework.dll",
+    "DocumentFormat.OpenXml.dll",
+    "ExcelNumberFormat.dll",
+    "RBush.dll",
+    "SixLabors.Fonts.dll",
+    "ClosedXML.Parser.dll",
+    "ClosedXML.dll"
+)
+foreach ($dependency in $closedXmlDependencies) {
+    $dependencyPath = Join-Path $assemblyDirectory $dependency
+    if (Test-Path -LiteralPath $dependencyPath) {
+        [System.Reflection.Assembly]::LoadFrom($dependencyPath) | Out-Null
+    }
+}
+$workbook = [ClosedXML.Excel.XLWorkbook]::new($heroWorkbookPath)
+try {
+    $sheetNames = @($workbook.Worksheets | ForEach-Object Name)
+    if ($sheetNames.Count -ne 2 -or
+        $sheetNames -notcontains "英雄贡献" -or
+        $sheetNames -notcontains "说明") {
+        throw "Excel hero report does not contain the expected worksheets."
+    }
+    $heroWorksheet = $workbook.Worksheet("英雄贡献")
+    if ($heroWorksheet.Cell(2, 2).GetString() -ne "Morphling" -or
+        $heroWorksheet.Cell(2, 3).DataType.ToString() -ne "Number" -or
+        $heroWorksheet.Cell(2, 3).GetDouble() -ne 10) {
+        throw "Excel hero report did not preserve text and numeric cell types."
+    }
+    if ($heroWorksheet.SheetView.SplitRow -ne 1) {
+        throw "Excel hero report did not freeze its header row."
+    }
+    $heroTable = $heroWorksheet.Table("HeroMmrContribution")
+    if (-not $heroTable.ShowAutoFilter -or $heroTable.RangeAddress.ToString() -ne "A1:M5") {
+        throw "Excel hero report table/filter range is incorrect."
+    }
+}
+finally {
+    $workbook.Dispose()
+}
+$spreadsheetDocument = [DocumentFormat.OpenXml.Packaging.SpreadsheetDocument]::Open(
+    $heroWorkbookPath,
+    $false
+)
+try {
+    $openXmlValidator = [DocumentFormat.OpenXml.Validation.OpenXmlValidator]::new()
+    $validationErrors = @($openXmlValidator.Validate($spreadsheetDocument))
+    if ($validationErrors.Count -ne 0) {
+        throw "Excel hero report failed Open XML validation: $($validationErrors[0].Description)"
+    }
+}
+finally {
+    $spreadsheetDocument.Dispose()
 }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if (-not ($manifest.outputs -match 'complete-mmr-curve.png')) {
@@ -91,6 +158,10 @@ if (-not ($manifest.outputs -match 'complete-mmr-curve.png')) {
 }
 if (-not ($manifest.outputs -match 'hero-mmr-contribution.txt')) {
     throw "Reconstruction manifest does not include the hero contribution report."
+}
+if (-not ($manifest.outputs -match 'hero-mmr-contribution.md') -or
+    -not ($manifest.outputs -match 'hero-mmr-contribution.xlsx')) {
+    throw "Reconstruction manifest does not include both supplementary hero reports."
 }
 $afterHash = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash
 if ($beforeHash -ne $afterHash) {

@@ -145,7 +145,7 @@ internal static class Program
             ? $"输出根目录：{options.OutputRoot}（登录后按账号创建子目录）"
             : $"原始输出：{options.OutputPath}");
         Console.WriteLine(options.GenerateReconstruction
-            ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/SVG/PNG/HTML。"
+            ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/MD/XLSX/SVG/PNG/HTML。"
             : "下载后：仅保留原始 GC 数据。 ");
         Console.WriteLine();
 
