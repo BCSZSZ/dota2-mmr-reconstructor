@@ -22,6 +22,8 @@ jobs:
           dotnet build .\collector\Dota2MmrCollector.csproj --configuration Release
           .\scripts\test_credential_login_security.ps1
           .\scripts\test_csharp_reconstruction.ps1
+          .\scripts\test_locked_workbook.ps1
+          dotnet run --project .\tests\collector\Dota2MmrCollector.Tests.csproj --configuration Release
       - name: Build collector archive
         shell: pwsh
         run: .\scripts\build_collector.ps1

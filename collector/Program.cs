@@ -52,6 +52,12 @@ internal static class Program
     private static string? loginRefreshToken;
     private static string? reconstructionError;
     private static ReconstructionOutput? reconstructionOutput;
+    private static GcMatchDetailsCollector? detailCollector;
+    private static Task? teammateTask;
+    private static bool teammateStarted;
+    private static readonly CancellationTokenSource teammateCancellation = new();
+    private static string? teammateStatus;
+    private static string? teammateReportPath;
     private static DateTime rankRequestedAtUtc;
     private static DateTime historyRequestedAtUtc;
 
@@ -101,7 +107,10 @@ internal static class Program
                     ?? AppContext.BaseDirectory,
                 reconstructionError,
                 options.GenerateReconstruction
-                    && (options.ExistingCollectionPath is not null || options.HistoryMatches > 0));
+                    && (options.ExistingCollectionPath is not null || options.HistoryMatches > 0),
+                teammateStatus,
+                reconstructionOutput?.Notices,
+                teammateReportPath);
         }
 
         return exitCode;
@@ -124,6 +133,9 @@ internal static class Program
                 $"({reconstructionOutput.ActualMatches:N0} 真实 / " +
                 $"{reconstructionOutput.ModeledMatches:N0} 拟合)。");
             Console.WriteLine($"交互 HTML：{reconstructionOutput.HtmlPath}");
+            foreach (var notice in reconstructionOutput.Notices) Console.WriteLine(notice);
+            if (options.GenerateTeammates)
+                WriteCachedTeammateReport(Path.GetDirectoryName(inputPath)!, ["本次为离线重建，仅使用已有GC详情与综合表现评分缓存，没有发送网络请求。"]);
             return 0;
         }
         catch (Exception exception) when (
@@ -175,6 +187,7 @@ internal static class Program
         steamClient = new SteamClient(configuration);
         steamUser = steamClient.GetHandler<SteamUser>();
         coordinator = steamClient.GetHandler<SteamGameCoordinator>();
+        detailCollector = new GcMatchDetailsCollector(steamClient, coordinator!);
         manager = new CallbackManager(steamClient);
         manager.Subscribe<SteamClient.ConnectedCallback>(OnConnected);
         manager.Subscribe<SteamClient.DisconnectedCallback>(OnDisconnected);
@@ -190,10 +203,23 @@ internal static class Program
             ? "正在连接 Steam；将使用一次性用户名/密码登录，随后弹出 Steam Guard 验证码窗口。"
             : "正在连接 Steam；二维码会在独立窗口显示，不会保存密码或登录令牌。");
         steamClient.Connect();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            if (!teammateStarted) return;
+            e.Cancel = true;
+            Console.WriteLine("正在停止队友采集并保存已有结果……");
+            teammateCancellation.Cancel();
+        };
         while (isRunning)
         {
             manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
             CheckResponseTimeouts();
+        }
+
+        if (teammateTask is not null)
+        {
+            teammateCancellation.Cancel();
+            teammateTask.GetAwaiter().GetResult();
         }
 
         if (!outputWritten && !suppressOutput && accountId != 0)
@@ -240,7 +266,9 @@ internal static class Program
                 selection.OutputRoot,
                 true,
                 null,
-                selection.Login);
+                selection.Login,
+                selection.GenerateTeammates,
+                selection.IncludeNormalMatches);
             return true;
         }
 
@@ -250,6 +278,8 @@ internal static class Program
         uint? expectedAccountId = null;
         var historyMatches = DefaultHistoryMatches;
         var generateReconstruction = true;
+        var generateTeammates = false;
+        var includeNormalMatches = false;
         var explicitOutputPath = false;
         var explicitCachePath = false;
         string? outputRoot = null;
@@ -346,6 +376,19 @@ internal static class Program
                 continue;
             }
 
+            if (argument == "--teammates")
+            {
+                generateTeammates = true;
+                continue;
+            }
+
+            if (argument == "--include-normal-matches")
+            {
+                includeNormalMatches = true;
+                generateTeammates = true;
+                continue;
+            }
+
             if (argument == "--reconstruct-existing")
             {
                 if (!TryReadValue(args, ref index, argument, out var value))
@@ -381,7 +424,9 @@ internal static class Program
             outputRoot,
             resolvePathsAfterLogin,
             existingCollectionPath,
-            SteamLoginSelection.QrCode);
+            SteamLoginSelection.QrCode,
+            generateTeammates && generateReconstruction,
+            includeNormalMatches && generateReconstruction);
         return true;
     }
 
@@ -407,10 +452,12 @@ internal static class Program
         Console.WriteLine(
             "Dota2MmrReconstructor [--account-id <ID32|SteamID64>] " +
             "[--history-matches <count>] " +
-            "[--output-dir <directory>] [--raw-only]");
+            "[--output-dir <directory>] [--raw-only] [--teammates] [--include-normal-matches]");
         Console.WriteLine(
             "Dota2MmrReconstructor --reconstruct-existing <gc-collection.json> " +
-            "[--output-dir <directory>]");
+            "[--output-dir <directory>] [--teammates] [--include-normal-matches]");
+        Console.WriteLine("--teammates 生成天梯队友报告；离线重建时只使用缓存，不请求网络。");
+        Console.WriteLine("--include-normal-matches 队友报告及详情采集包含常规普通匹配；MMR曲线仍仅含天梯。");
         Console.WriteLine("双击运行会显示设置窗口；默认下载 5,000 行并生成完整曲线和 HTML。");
         Console.WriteLine("history-matches 是断点缓存最终保留的目标总行数；重复运行会先复用缓存。");
         Console.WriteLine("account-id 同时接受 ID32 和个人账号 SteamID64，也可以在 GUI 中留空自动识别。");
@@ -773,8 +820,16 @@ internal static class Program
 
         if (!disconnectRequested)
         {
-            reconstructionError ??= "原始数据下载完成前与 Steam 断开连接。";
-            Console.Error.WriteLine(reconstructionError);
+            if (teammateStarted)
+            {
+                Console.WriteLine("队友采集期间Steam断开，正在保存已有结果。");
+                teammateCancellation.Cancel();
+            }
+            else
+            {
+                reconstructionError ??= "原始数据下载完成前与 Steam 断开连接。";
+                Console.Error.WriteLine(reconstructionError);
+            }
         }
 
         isRunning = false;
@@ -801,6 +856,9 @@ internal static class Program
                 break;
             case (uint)EDOTAGCMsg.k_EMsgDOTAGetPlayerMatchHistoryResponse:
                 OnMatchHistory(callback.Message);
+                break;
+            case (uint)EDOTAGCMsg.k_EMsgGCMatchDetailsResponse:
+                detailCollector?.OnResponse(callback.Message);
                 break;
         }
     }
@@ -1054,8 +1112,125 @@ internal static class Program
         }
 
         WriteOutput(null);
+        if (options.GenerateTeammates && reconstructionOutput is not null)
+        {
+            if (!teammateStarted)
+            {
+                teammateStarted = true;
+                teammateTask = CollectTeammatesAsync();
+            }
+            return;
+        }
         disconnectRequested = true;
         steamClient?.Disconnect();
+    }
+
+    private static void WriteCachedTeammateReport(string accountDirectory, List<string> notes)
+    {
+        var output = reconstructionOutput!;
+        var scope = ReadTeammateScope();
+        var cache = new TeammateCache(accountDirectory, output.AccountId);
+        var report = TeammateReport.Build(scope, cache, notes) with { IncludesNormalMatches = options.IncludeNormalMatches };
+        TeammateReport.Write(output.OutputDirectory, report);
+        teammateReportPath = Path.Combine(output.OutputDirectory, "teammate-report.html");
+        WriteTeammateRequests(scope, cache, output.OutputDirectory);
+        teammateStatus = $"队友报告：候选队友 {report.Teammates.Count}人（同队至少2局），详情完整 {report.CompleteMatches}/{report.ScopeMatches}场。\n" +
+            $"队友报告：{teammateReportPath}\n打开报告后按时间范围和最低局数筛选；缺失数据及评分覆盖率会在报告中标明。";
+        Console.WriteLine(teammateStatus);
+    }
+
+    private static IReadOnlyList<TeammateMatch> ReadTeammateScope() => TeammateReport.ReadScope(
+        reconstructionOutput!.OutputDirectory, reconstructionOutput.AccountId,
+        options.IncludeNormalMatches ? options.ExistingCollectionPath ?? options.OutputPath : null);
+
+    private static void WriteTeammateRequests(IReadOnlyList<TeammateMatch> scope, TeammateCache cache, string outputDirectory)
+    {
+        var targets = TeammateReport.ImpTargets(scope, cache);
+        TeammateCache.Write(Path.Combine(outputDirectory, "teammate-requests.json"), new
+        {
+            AccountId = cache.AccountId,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            IncludeNormalMatches = options.IncludeNormalMatches,
+            MinimumCandidateMatches = TeammateReport.MinimumMatches,
+            RankedMatchIds = scope.Where(m => m.IsRanked).Select(m => m.MatchId.ToString()).ToArray(),
+            NormalMatchIds = scope.Where(m => !m.IsRanked).Select(m => m.MatchId.ToString()).ToArray(),
+            ScopeMatchIds = scope.Select(m => m.MatchId.ToString()).ToArray(),
+            GcPendingMatchIds = scope.Where(m => cache.ReadGc(m)?.Complete != true).Select(m => m.MatchId.ToString()).ToArray(),
+            StratzTargetMatchIds = targets.Keys.Select(id => id.ToString()).ToArray(),
+            StratzPendingMatchIds = targets.Where(p => p.Value.Any(id => cache.ReadImp(p.Key)?.Players.GetValueOrDefault(id) is null))
+                .Select(p => p.Key.ToString()).ToArray(),
+        });
+    }
+
+    private static async Task CollectTeammatesAsync()
+    {
+        var directory = Path.GetDirectoryName(options.OutputPath)!;
+        var notes = new List<string>();
+        var cancellationToken = teammateCancellation.Token;
+        try
+        {
+            var scope = ReadTeammateScope();
+            var cache = new TeammateCache(directory, accountId);
+            Console.WriteLine($"队友采集范围：天梯 {scope.Count(m => m.IsRanked):N0} 场，普通匹配 {scope.Count(m => !m.IsRanked):N0} 场。MMR曲线仅含天梯。");
+            WriteTeammateRequests(scope, cache, reconstructionOutput!.OutputDirectory);
+            await detailCollector!.CollectAsync(scope, cache, notes, cancellationToken);
+            WriteCachedTeammateReport(directory, [.. notes, "基础报告已生成，综合表现评分正在补充。"]);
+            var targets = TeammateReport.ImpTargets(scope, cache);
+            if (targets.All(p => p.Value.All(id => cache.ReadImp(p.Key)?.Players.GetValueOrDefault(id) is not null))) return;
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
+            var stratz = new StratzClient(http);
+            var token = StratzLogin.Load(accountId);
+            if (token is not null)
+            {
+                try { await stratz.ValidateAsync(token, cancellationToken); }
+                catch (StratzException e) when (e.AuthenticationFailed) { token = null; }
+            }
+            if (token is null && loginRefreshToken is not null)
+            {
+                Console.WriteLine("正在尝试通过本次Steam登录获取STRATZ个人令牌……");
+                token = await StratzLogin.TrySteamAsync(steamClient!, loginRefreshToken, cancellationToken);
+                if (token is not null)
+                {
+                    try { await stratz.ValidateAsync(token, cancellationToken); }
+                    catch (StratzException e) when (e.AuthenticationFailed) { token = null; }
+                }
+            }
+            if (token is null && options.Interactive)
+            {
+                token = await StratzLogin.AskTokenAsync(cancellationToken);
+                if (token is not null) await stratz.ValidateAsync(token, cancellationToken);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (token is null)
+            {
+                notes.Add("未提供有效的STRATZ个人令牌。缺失的综合表现评分暂留空；其他指标正常计算。");
+                return;
+            }
+            try { StratzLogin.Save(accountId, token); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+            { notes.Add("STRATZ令牌本次可用，但未能加密保存；下次可能需要重新授权。"); }
+            await stratz.CollectAsync(token, targets, cache, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        { notes.Add("队友采集已中断或请求超时，缓存已保留；再次运行可补齐缺失数据。"); }
+        catch (StratzException e) { notes.Add(e.Message); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException
+            or InvalidOperationException or HttpRequestException or FormatException)
+        {
+            notes.Add($"队友采集未全部完成（{e.GetType().Name}），已保留原MMR报告和采集缓存。");
+        }
+        finally
+        {
+            try { WriteCachedTeammateReport(directory, notes); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+            {
+                teammateStatus = "队友报告未能写入，原MMR报告已保留。请检查输出目录后重试。";
+                Console.Error.WriteLine(teammateStatus);
+            }
+            ClearLoginToken();
+            disconnectRequested = true;
+            steamClient?.Disconnect();
+        }
     }
 
     private static void WriteOutput(string? completionError)
@@ -1114,6 +1289,7 @@ internal static class Program
                     $"({reconstructionOutput.ActualMatches:N0} 真实 / " +
                     $"{reconstructionOutput.ModeledMatches:N0} 拟合)。");
                 Console.WriteLine($"交互 HTML：{reconstructionOutput.HtmlPath}");
+                foreach (var notice in reconstructionOutput.Notices) Console.WriteLine(notice);
             }
             catch (Exception exception) when (
                 exception is IOException or JsonException or InvalidDataException
@@ -1126,7 +1302,6 @@ internal static class Program
             }
         }
 
-        ClearLoginToken();
     }
 
     private static void EnsureParentDirectory(string path)
@@ -1174,7 +1349,9 @@ internal sealed record CollectorOptions(
     string? OutputRoot,
     bool ResolvePathsAfterLogin,
     string? ExistingCollectionPath,
-    SteamLoginSelection Login);
+    SteamLoginSelection Login,
+    bool GenerateTeammates = false,
+    bool IncludeNormalMatches = false);
 
 internal sealed record FieldObservation(bool Present, object Value);
 

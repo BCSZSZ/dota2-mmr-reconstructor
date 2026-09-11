@@ -163,7 +163,10 @@ internal static class MmrReconstructor
         var heroReport = BuildHeroContributionReport(source.AccountId, rows);
         WriteHeroContributionReport(heroReportPath, heroReport);
         HeroContributionSupplementaryReports.WriteMarkdown(heroMarkdownPath, heroReport);
-        HeroContributionSupplementaryReports.WriteWorkbook(heroWorkbookPath, heroReport);
+        var savedWorkbookPath = HeroContributionSupplementaryReports.WriteWorkbook(heroWorkbookPath, heroReport);
+        string[] notices = savedWorkbookPath == heroWorkbookPath ? [] :
+            [$"原Excel文件无法覆盖（可能被占用或只读），已另存为：{Path.GetFileName(savedWorkbookPath)}"];
+        heroWorkbookPath = savedWorkbookPath;
         WriteStandaloneHtml(htmlPath, dataset, source.AccountId);
 
         var manifestPath = Path.Combine(
@@ -185,6 +188,7 @@ internal static class MmrReconstructor
             ["model_output_directory"] = Path.GetFullPath(outputDirectory),
             ["outputs"] = outputPaths.Select(Path.GetFullPath).ToArray(),
             ["raw_input_was_modified"] = false,
+            ["notices"] = notices,
         }, PrettyJson);
 
         return new ReconstructionOutput(
@@ -194,7 +198,7 @@ internal static class MmrReconstructor
             hiddenRows.Count,
             outputDirectory,
             htmlPath,
-            outputPaths.Append(manifestPath).ToArray());
+            outputPaths.Append(manifestPath).ToArray()) { Notices = notices };
     }
 
     private static SourceData LoadSource(string path, uint? expectedAccountId)
@@ -1543,7 +1547,10 @@ internal sealed record ReconstructionOutput(
     int ModeledMatches,
     string OutputDirectory,
     string HtmlPath,
-    IReadOnlyList<string> OutputPaths);
+    IReadOnlyList<string> OutputPaths)
+{
+    public IReadOnlyList<string> Notices { get; init; } = [];
+}
 
 internal sealed record SourceData(
     uint AccountId,

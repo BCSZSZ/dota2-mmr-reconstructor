@@ -71,7 +71,7 @@ internal static class HeroContributionSupplementaryReports
         WriteTextAtomically(path, builder.ToString());
     }
 
-    public static void WriteWorkbook(string path, HeroContributionReport report)
+    public static string WriteWorkbook(string path, HeroContributionReport report)
     {
         using var workbook = new XLWorkbook();
         var dataSheet = workbook.Worksheets.Add("英雄贡献");
@@ -84,7 +84,23 @@ internal static class HeroContributionSupplementaryReports
         try
         {
             workbook.SaveAs(temporary);
-            File.Move(temporary, path, true);
+            try
+            {
+                File.Move(temporary, path, true);
+            }
+            catch (Exception exception) when (
+                (exception is IOException or UnauthorizedAccessException) && File.Exists(path))
+            {
+                // Excel can deny replacement while the existing workbook is open.
+                path = Path.Combine(Path.GetDirectoryName(path)!,
+                    $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss-fff}.xlsx");
+                File.Move(temporary, path);
+            }
+            return path;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"无法写入Excel报告：{path}\n{exception.Message}", exception);
         }
         finally
         {

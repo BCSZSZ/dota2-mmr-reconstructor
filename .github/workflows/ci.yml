@@ -29,3 +29,6 @@ jobs:
       - run: dotnet build collector/Dota2MmrCollector.csproj --configuration Release
       - shell: pwsh
         run: .\scripts\test_csharp_reconstruction.ps1
+      - shell: pwsh
+        run: .\scripts\test_locked_workbook.ps1
+      - run: dotnet run --project tests/collector/Dota2MmrCollector.Tests.csproj --configuration Release

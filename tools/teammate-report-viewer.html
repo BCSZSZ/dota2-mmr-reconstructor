@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>队友报告</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#f3f5f9;color:#182b42;font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif}
+  main{max-width:1280px;margin:auto;padding:32px 24px}h1{margin:0;font-size:32px}h2{font-size:18px;margin:0}p{margin:8px 0}
+  .sub,small{color:#64748b}a{color:#245f91}.overview,.controls,.notice{padding:18px 22px;background:white;border-radius:12px;margin:20px 0}
+  .controls{position:sticky;top:12px;z-index:2;box-shadow:0 3px 18px #182b4212;border:1px solid #dce5ee}
+  .control-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.control-line label{font-size:17px;font-weight:650}
+  #minimum-number{width:88px;padding:6px 8px;border:1px solid #b9c9d9;border-radius:6px;font:inherit}
+  #minimum-range{flex:1;min-width:150px;accent-color:#2a779a;cursor:pointer;height:30px}
+  #minimum-range:focus-visible{outline:2px solid #2a779a;outline-offset:4px;border-radius:4px}
+  .controls p{margin-bottom:0;font-size:13px}.notice{border-left:4px solid #d99026}
+  .overview{display:flex;gap:22px 42px;flex-wrap:wrap}.overview strong{display:block;font-size:27px;color:#1b5676;font-variant-numeric:tabular-nums}
+  .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.ranking-column{min-width:0;display:grid;grid-template-rows:subgrid;grid-row:span 5;gap:20px}.chart{background:white;padding:22px;border-radius:12px;min-width:0;border-top:4px solid var(--bar)}
+  .curve-panel{background:white;border-radius:12px;padding:18px 22px;margin:20px 0}.date-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:14px}
+  .date-controls input,.date-controls button{font:inherit;padding:5px 8px;border:1px solid #b9c9d9;border-radius:6px;background:white;color:inherit}
+  #mmr-curve{display:block;width:100%;height:250px;touch-action:none;cursor:crosshair}#mmr-curve text{font:12px system-ui;fill:#64748b}.curve-line{fill:none;stroke:#2475a5;stroke-width:1.7}.curve-line.estimated{stroke:#ca8a27;stroke-dasharray:5 3}
+  .curve-grid{stroke:#e6edf3;stroke-width:1}.curve-selection{fill:#2475a514;stroke:#2475a5;stroke-width:1.5}.curve-handle{stroke:#2475a5;stroke-width:4}.curve-hover{min-height:25px;font-size:13px}
+  #selected-range{font-weight:600;color:#1b5676}
+  .chart header p{font-size:13px;margin:5px 0 12px}.axis{display:flex;justify-content:space-between;border-bottom:1px solid #dce5ee;font-size:12px;color:#64748b;margin:10px 0}
+  .bar-list{padding-right:6px}.bar-row{margin:14px 0 20px}
+  .bar-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.player{min-width:0;overflow-wrap:anywhere;font-weight:600}
+  .rank{display:inline-block;min-width:24px;color:#94a3b8}.value{white-space:nowrap;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--bar)}
+  .bar-track{background:#eff3f7;height:9px;border-radius:3px;position:relative;margin:6px 0}.bar-fill{position:absolute;left:0;top:0;height:100%;border-radius:3px;background:var(--bar)}
+  .negative .bar-fill{left:auto;right:0}.sample{font-size:12px;color:#64748b}.empty{color:#64748b;padding:24px 0}.rank-note{color:#64748b;font-size:12px;margin-top:12px}
+  details{margin-top:28px}summary{cursor:pointer;font-weight:600}.scroll{overflow-x:auto;margin-top:12px}table{width:100%;border-collapse:collapse;background:white;font-size:14px}
+  th,td{padding:10px 13px;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}footer{margin-top:28px;color:#64748b;font-size:13px}
+  @media(max-width:850px){.cards{grid-template-columns:1fr}.ranking-column{display:flex;flex-direction:column;grid-row:auto}main{padding:20px 14px}.controls{top:0;padding:14px}.chart{padding:18px}#minimum-range{flex-basis:100%}.overview{gap:18px 28px}}
+  @media print{.controls{position:static;box-shadow:none}.bar-list{max-height:none;overflow:visible}.chart{break-inside:avoid}body{background:white}}
+</style>
+<main>
+  <h1 id="report-title">队友报告</h1>
+  <p class="sub" id="scope"></p>
+  <div id="notices"></div>
+  <section class="curve-panel" aria-label="从天梯分数图选择时间范围">
+    <h2>天梯分数与统计范围</h2>
+    <p class="sub">在图上左右拖动框选时间，或拖动选区两端调整范围。蓝色实线为真实分数，橙色虚线为估算；空白时段没有天梯分数。</p>
+    <svg id="mmr-curve" role="img" aria-label="天梯分数曲线；拖动选择统计时间范围，也可使用下方日期输入框"></svg>
+    <div class="sub curve-hover" id="curve-hover"></div>
+    <div class="date-controls"><label>开始日期 <input id="date-from" type="date"></label><label>结束日期 <input id="date-to" type="date"></label><button id="reset-range" type="button">全部时间</button><small>日期按UTC，两端日期均包含</small></div>
+  </section>
+  <section class="controls" aria-label="筛选队友">
+    <p id="selected-range"></p>
+    <label><input id="include-normal" type="checkbox"> 包含普通匹配（天梯＋常规普通匹配）</label>
+    <p class="sub" id="normal-hint"></p>
+    <div class="control-line">
+      <label for="minimum-range">最低同队局数</label>
+      <input id="minimum-number" type="number" aria-label="输入最低同队局数" step="1"><span>局</span>
+      <input id="minimum-range" type="range" aria-label="拖动调整最低同队局数" step="1">
+    </div>
+    <p class="sub">最低局数在所选时间范围内计算，可下调到2局。各榜单还要求对应数据的有效局数达到此门槛；缺失数据不算有效样本。</p>
+  </section>
+  <section class="overview" aria-live="polite">
+    <div>符合门槛的队友<strong id="selected-count"></strong></div>
+    <div>共同比赛（去重）<strong id="together-count"></strong><small id="together-split"></small></div>
+    <div>共同天梯净变化<strong id="together-mmr"></strong></div>
+  </section>
+  <p class="sub" id="coverage"></p>
+  <div class="cards" id="charts"><section class="ranking-column" id="good-charts" aria-label="好表现榜"><h2>好表现榜</h2></section><section class="ranking-column" id="bad-charts" aria-label="差表现榜"><h2>差表现榜</h2></section></div>
+  <details><summary id="table-summary">查看筛选后的全部队友</summary><div class="scroll"><table>
+    <thead><tr><th>队友 / 账号ID</th><th>同队局数</th><th>胜率</th><th>平均综合表现 / 有效局数</th><th>场均死亡 / 有效局数</th><th>场均K+A / 有效局数</th><th>累计加分</th><th>累计扣分</th><th>净变化</th><th>GC真实 / 局数</th><th>估算 / 局数</th></tr></thead>
+    <tbody id="teammates"></tbody>
+  </table></div></details>
+  <footer>
+    <p>每张图显示该指标的前10名，末位并列会一并保留。柱长表示数值大小；胜率从0%起算，负综合表现与净下分图的0在右侧。</p>
+    <p>全量历史同队至少2局的账号进入候选名单，再按时间范围、普通匹配开关和最低局数重新汇总筛选。昵称使用最近记录，按Steam账号ID识别，也包括反复匹配到的同阵营玩家。少量对局的排名更容易波动，可提高最低局数。</p>
+    <p>分数图始终显示完整天梯曲线，选区控制下方榜单。普通匹配参与区间内的局数、胜率、击杀助攻、死亡及综合表现；上分／下分榜只计算该区间内的天梯，并要求共同天梯局数达到所选门槛。逐场分差排除校准跳变，多人同局对各队友分别记录，概览按比赛去重；隐藏分数沿用原模型估算。这些结果不表示输赢由某个队友独自造成。</p>
+    <p>平均综合表现为 <a href="https://stratz.com">STRATZ</a> 比赛评分的平均值，以0为中性参照；不同英雄的平均评分可能不同。缺失评分不计为0。报告可离线使用，框选和滑块不会发送网络请求。</p>
+  </footer>
+  <noscript>请在浏览器中打开并启用JavaScript，以显示交互图表。</noscript>
+</main>
+<script id="report-data" type="application/json">__TEAMMATE_DATA__</script>
+<script>
+(() => {
+  'use strict';
+  const allReport = JSON.parse(document.getElementById('report-data').textContent);
+  const byId = id => document.getElementById(id);
+  const number = (n, digits = 0) => n.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const signed = (n, digits = 0) => (n > 0 ? '+' : '') + number(n, digits);
+  const cellNumber = n => n === null ? '—' : number(n, 2);
+  const node = (tag, className, text) => {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+  const minimum = allReport.MinimumMatches;
+  const maximum = Math.max(allReport.DefaultMinimumMatches, ...allReport.Teammates.map(t => t.Matches));
+  const range = byId('minimum-range');
+  const numeric = byId('minimum-number');
+  const normal = byId('include-normal');
+  normal.checked = allReport.IncludesNormalMatches;
+  normal.disabled = !allReport.IncludesNormalMatches;
+  byId('normal-hint').textContent = normal.disabled
+    ? '本次只采集天梯。若要包含普通匹配，请重新运行程序并勾选“队友报告包含普通匹配”，已有缓存会复用。'
+    : '开启后，所选时间内的天梯和常规普通匹配合并统计；上分／下分仍仅用天梯。切换无需联网。';
+  for (const input of [range, numeric]) { input.min = minimum; input.max = maximum; input.value = allReport.DefaultMinimumMatches; }
+
+  const matchSample = t => `同队 ${t.Matches}局（天梯 ${t.RankedMatches} / 普通 ${t.NormalMatches}）`;
+  const winSample = t => `${t.Wins}胜 ${t.Losses}负 · ${matchSample(t)}`;
+  const impSample = t => `同队 ${t.Matches}局 · 有效评分 ${t.ImpMatches}/${t.Matches}局`;
+  const mmrSample = t => `共同天梯 ${t.RankedMatches}局 · 加分 +${number(t.MmrGain)} / 扣分 −${number(t.MmrLoss)} · 真实 ${signed(t.ActualMmr)}（${t.ActualMatches}局）/ 估算 ${signed(t.EstimatedMmr)}（${t.EstimatedMatches}局）`;
+  const metrics = [
+    { id: 'win-high', good: true, title: '同队胜率最高', key: 'WinRate', descending: true, color: '#247d89', unit: '%', maximum: 1, eligible: () => true, format: v => number(v * 100, 1) + '%', sample: winSample },
+    { id: 'imp-high', good: true, title: '平均综合表现最高', key: 'AverageImp', descending: true, color: '#247d89', unit: '评分', eligible: (t, n) => t.ImpMatches >= n && t.AverageImp > 0, format: v => signed(v, 2), sample: impSample },
+    { id: 'kills-assists', good: true, title: '场均击杀＋助攻最多', key: 'AverageKillsAssists', descending: true, color: '#247d89', unit: '次', eligible: (t, n) => t.KillAssistMatches >= n, format: v => number(v, 2), sample: t => `同队 ${t.Matches}局 · 有效K+A ${t.KillAssistMatches}/${t.Matches}局` },
+    { id: 'mmr-high', good: true, title: '一起净上分最多', key: 'NetMmr', descending: true, color: '#247d89', unit: 'MMR', eligible: (t, n) => t.RankedMatches >= n && t.NetMmr > 0, format: v => signed(v), sample: mmrSample },
+    { id: 'win-low', title: '同队胜率最低', key: 'WinRate', descending: false, color: '#b66144', unit: '%', maximum: 1, eligible: () => true, format: v => number(v * 100, 1) + '%', sample: winSample },
+    { id: 'imp-low', title: '平均综合表现最低', key: 'AverageImp', descending: false, color: '#b66144', unit: '评分', negative: true, eligible: (t, n) => t.ImpMatches >= n && t.AverageImp < 0, format: v => signed(v, 2), sample: impSample },
+    { id: 'deaths', title: '场均死亡最多', key: 'AverageDeaths', descending: true, color: '#b66144', unit: '次', eligible: (t, n) => t.DeathMatches >= n, format: v => number(v, 2), sample: t => `同队 ${t.Matches}局 · 有效死亡数据 ${t.DeathMatches}/${t.Matches}局` },
+    { id: 'mmr-low', title: '一起净下分最多', key: 'NetMmr', descending: false, color: '#b66144', unit: 'MMR', negative: true, eligible: (t, n) => t.RankedMatches >= n && t.NetMmr < 0, format: v => signed(v), sample: mmrSample },
+  ];
+
+  function drawChart(metric, teammates, threshold) {
+    const all = teammates.filter(t => metric.eligible(t, threshold)).sort((a, b) => (metric.descending ? -1 : 1) * (a[metric.key] - b[metric.key]) || a.AccountId - b.AccountId);
+    const cutoff = all[Math.min(9, all.length - 1)]?.[metric.key];
+    const shown = all.filter((t, i) => i < 10 || Math.abs(t[metric.key] - cutoff) < 1e-9);
+    const card = node('section', 'chart');
+    card.id = metric.id;
+    card.style.setProperty('--bar', metric.color);
+    const header = node('header');
+    header.append(node('h2', '', metric.title), node('p', 'sub', `符合条件 ${all.length}人 · 显示 ${shown.length}人 · ${metric.descending ? '从高到低' : '从低到高'}`));
+    card.append(header);
+    if (!shown.length) { card.append(node('p', 'empty', `所选范围内没有符合该榜条件且有效样本至少${threshold}局的队友`)); return card; }
+    const extent = metric.maximum ?? Math.max(1, ...shown.map(t => Math.abs(t[metric.key])));
+    const axis = node('div', 'axis');
+    axis.append(node('span', '', metric.negative ? metric.format(-extent) : '0'), node('span', '', metric.unit), node('span', '', metric.negative ? '0' : metric.format(extent)));
+    card.append(axis);
+    const list = node('div', 'bar-list');
+    shown.forEach(t => {
+      const value = t[metric.key];
+      const row = node('div', 'bar-row' + (metric.negative ? ' negative' : ''));
+      row.dataset.accountId = t.AccountId;
+      row.dataset.value = value;
+      const heading = node('div', 'bar-heading');
+      const player = node('div', 'player');
+      const rank = all.findIndex(other => Math.abs(other[metric.key] - value) < 1e-9) + 1;
+      player.append(node('span', 'rank', rank + '.'), document.createTextNode(t.Name), node('small', '', ` #${t.AccountId}`));
+      heading.append(player, node('span', 'value', metric.format(value)));
+      const track = node('div', 'bar-track');
+      const fill = node('div', 'bar-fill');
+      fill.style.width = Math.min(100, Math.abs(value) / extent * 100) + '%';
+      track.append(fill);
+      row.append(heading, track, node('div', 'sample', metric.sample(t)));
+      list.append(row);
+    });
+    card.append(list);
+    if (shown.length < all.length) card.append(node('div', 'rank-note', '其他队友可在页面下方的完整名单中查看。'));
+    return card;
+  }
+
+  const names = new Map(allReport.Teammates.map(t => [t.AccountId, t.Name]));
+  const matchesByTime = allReport.Matches.map(m => ({...m, time: Date.parse(m.DateUtc)})).sort((a, b) => a.time - b.time);
+  const day = 86400000;
+  const startOfDay = time => Math.floor(time / day) * day;
+  const dateText = time => new Date(time).toISOString().slice(0, 10);
+  const fullStart = startOfDay(matchesByTime[0]?.time ?? 0);
+  const fullEnd = startOfDay(matchesByTime.at(-1)?.time ?? 0) + day - 1;
+  let from = fullStart, to = fullEnd, frame = 0;
+  const dateFrom = byId('date-from'), dateTo = byId('date-to');
+  for (const input of [dateFrom, dateTo]) { input.min = dateText(fullStart); input.max = dateText(fullEnd); input.disabled = !matchesByTime.length; }
+  byId('reset-range').disabled = !matchesByTime.length;
+
+  function aggregate(matches) {
+    const stats = new Map();
+    for (const m of matches) for (const p of m.Players) {
+      if (!stats.has(p.AccountId)) stats.set(p.AccountId, {AccountId: p.AccountId, Name: names.get(p.AccountId),
+        Matches: 0, Wins: 0, RankedMatches: 0, NormalMatches: 0, DeathMatches: 0, Deaths: 0,
+        KillAssistMatches: 0, KillsAssists: 0, ImpMatches: 0, ImpSum: 0, MmrGain: 0, MmrLoss: 0,
+        ActualMatches: 0, ActualMmr: 0, EstimatedMatches: 0, EstimatedMmr: 0});
+      const t = stats.get(p.AccountId);
+      t.Matches++; if (m.Won) t.Wins++;
+      if (p.Deaths !== null) { t.DeathMatches++; t.Deaths += p.Deaths; }
+      if (p.KillsAssists !== null) { t.KillAssistMatches++; t.KillsAssists += p.KillsAssists; }
+      if (p.Imp !== null) { t.ImpMatches++; t.ImpSum += p.Imp; }
+      if (m.MmrChange === null) t.NormalMatches++;
+      else {
+        t.RankedMatches++; t.MmrGain += Math.max(0, m.MmrChange); t.MmrLoss += Math.max(0, -m.MmrChange);
+        if (m.Estimated) { t.EstimatedMatches++; t.EstimatedMmr += m.MmrChange; }
+        else { t.ActualMatches++; t.ActualMmr += m.MmrChange; }
+      }
+    }
+    return [...stats.values()].map(t => ({...t, Losses: t.Matches - t.Wins, WinRate: t.Wins / t.Matches,
+      AverageDeaths: t.DeathMatches ? t.Deaths / t.DeathMatches : null,
+      AverageKillsAssists: t.KillAssistMatches ? t.KillsAssists / t.KillAssistMatches : null,
+      AverageImp: t.ImpMatches ? t.ImpSum / t.ImpMatches : null, NetMmr: t.MmrGain - t.MmrLoss
+    })).sort((a, b) => b.Matches - a.Matches || a.AccountId - b.AccountId);
+  }
+
+  const svg = byId('mmr-curve');
+  const points = matchesByTime.filter(m => m.MmrChange !== null && Number.isFinite(m.CurveMmr));
+  let plot, drag = null;
+  const svgNode = (tag, attrs, text) => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+  const xScale = time => plot.left + (time - fullStart) / (fullEnd - fullStart) * plot.width;
+  function showSelection() {
+    if (!plot) return;
+    const left = xScale(from), right = xScale(to);
+    const band = byId('curve-selection');
+    band.setAttribute('x', left); band.setAttribute('width', Math.max(1, right - left));
+    for (const [id, x] of [['curve-start', left], ['curve-end', right]]) {
+      const handle = byId(id); handle.setAttribute('x1', x); handle.setAttribute('x2', x);
+    }
+  }
+  function drawCurve() {
+    const width = Math.max(280, svg.clientWidth);
+    plot = {left: 52, right: width - 12, top: 20, bottom: 214, width: width - 64};
+    svg.setAttribute('viewBox', `0 0 ${width} 250`);
+    svg.replaceChildren(svgNode('title', {}, '天梯分数曲线：拖动框选统计日期'));
+    const values = points.map(p => p.CurveMmr);
+    const low = values.length ? Math.floor((Math.min(...values) - 50) / 100) * 100 : 0;
+    const high = values.length ? Math.ceil((Math.max(...values) + 50) / 100) * 100 : 100;
+    const y = value => plot.bottom - (value - low) / (high - low) * (plot.bottom - plot.top);
+    if (points.length) for (let i = 0; i <= 4; i++) {
+      const value = low + (high - low) * i / 4;
+      svg.append(svgNode('line', {class: 'curve-grid', x1: plot.left, x2: plot.right, y1: y(value), y2: y(value)}),
+        svgNode('text', {x: plot.left - 7, y: y(value) + 4, 'text-anchor': 'end'}, number(Math.round(value))));
+    }
+    if (matchesByTime.length) {
+      const ticks = width < 560 ? 2 : 5;
+      for (let i = 0; i <= ticks; i++) {
+        const time = fullStart + (fullEnd - fullStart) * i / ticks;
+        svg.append(svgNode('text', {x: xScale(time), y: 240, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle'}, dateText(time)));
+      }
+    }
+    let actual = '', estimated = '';
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      const segment = `M${xScale(a.time).toFixed(2)},${y(a.CurveMmr).toFixed(2)}L${xScale(b.time).toFixed(2)},${y(b.CurveMmr).toFixed(2)}`;
+      if (b.Estimated) estimated += segment; else actual += segment;
+    }
+    svg.append(svgNode('path', {class: 'curve-line actual', d: actual}), svgNode('path', {class: 'curve-line estimated', d: estimated}));
+    if (points.length === 1) svg.append(svgNode('circle', {cx: xScale(points[0].time), cy: y(points[0].CurveMmr), r: 3, fill: '#2475a5'}));
+    if (!points.length) svg.append(svgNode('text', {x: width / 2, y: 115, 'text-anchor': 'middle'}, '没有可绘制的天梯分数'));
+    svg.append(svgNode('rect', {id: 'curve-selection', class: 'curve-selection', y: plot.top, height: plot.bottom - plot.top}));
+    for (const id of ['curve-start', 'curve-end']) svg.append(svgNode('line', {id, class: 'curve-handle', y1: plot.top, y2: plot.bottom}));
+    showSelection();
+  }
+  function refresh() {
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; render(Number(numeric.value)); });
+  }
+  function selectDates(a, b) {
+    const clamp = value => Math.max(fullStart, Math.min(startOfDay(fullEnd), startOfDay(value)));
+    from = Math.min(clamp(a), clamp(b)); to = Math.max(clamp(a), clamp(b)) + day - 1;
+    refresh();
+  }
+  const timeAtPointer = event => fullStart + Math.max(0, Math.min(1, (event.clientX - svg.getBoundingClientRect().left - plot.left) / plot.width)) * (fullEnd - fullStart);
+  svg.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !matchesByTime.length) return;
+    const rect = svg.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top;
+    if (x < plot.left || x > plot.right || y < plot.top || y > plot.bottom) return;
+    const time = timeAtPointer(event);
+    drag = {anchor: Math.abs(x - xScale(from)) < 10 ? to : Math.abs(x - xScale(to)) < 10 ? from : time, previous: [from, to]};
+    svg.setPointerCapture(event.pointerId); event.preventDefault(); selectDates(drag.anchor, time);
+  });
+  svg.addEventListener('pointermove', event => {
+    const time = timeAtPointer(event);
+    if (drag) { selectDates(drag.anchor, time); return; }
+    const nearest = points.reduce((best, p) => !best || Math.abs(p.time - time) < Math.abs(best.time - time) ? p : best, null);
+    byId('curve-hover').textContent = nearest && time >= points[0].time && time <= points.at(-1).time
+      ? `${dateText(nearest.time)} · 天梯分数 ${number(nearest.CurveMmr)} · ${nearest.Estimated ? '估算' : '真实'} · 比赛 ${nearest.MatchId}` : '该时段没有天梯分数，可按日期筛选普通匹配。';
+  });
+  svg.addEventListener('pointerup', event => {
+    if (!drag) return;
+    selectDates(drag.anchor, timeAtPointer(event)); drag = null;
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+  });
+  svg.addEventListener('pointercancel', () => { if (drag) { [from, to] = drag.previous; drag = null; refresh(); } });
+  svg.addEventListener('pointerleave', () => { byId('curve-hover').textContent = ''; });
+  for (const input of [dateFrom, dateTo]) input.addEventListener('change', () => selectDates(Date.parse(dateFrom.value) || from, Date.parse(dateTo.value) || to));
+  byId('reset-range').addEventListener('click', () => selectDates(fullStart, fullEnd));
+  new ResizeObserver(drawCurve).observe(svg);
+
+  function render(threshold) {
+    threshold = Math.min(maximum, Math.max(minimum, Math.round(threshold || minimum)));
+    range.value = numeric.value = threshold;
+    dateFrom.value = matchesByTime.length ? dateText(from) : ''; dateTo.value = matchesByTime.length ? dateText(to) : '';
+    byId('selected-range').textContent = matchesByTime.length ? `统计范围：${dateText(from)} 至 ${dateText(to)}（UTC）` : '当前没有比赛数据';
+    showSelection();
+    const scope = matchesByTime.filter(m => (normal.checked || m.MmrChange !== null) && m.time >= from && m.time <= to);
+    const normalCount = scope.filter(m => m.MmrChange === null).length;
+    const complete = scope.filter(m => m.Complete).length;
+    document.title = byId('report-title').textContent = normal.checked ? '天梯＋普通匹配队友报告' : '天梯队友报告';
+    byId('scope').textContent = `账号 ${allReport.AccountId} · 所选范围：天梯 ${number(scope.length - normalCount)} 场 · 普通匹配 ${number(normalCount)} 场 · 详情完整 ${number(complete)}/${number(scope.length)} 场`;
+    byId('notices').replaceChildren();
+    if (complete < scope.length) byId('notices').append(node('div', 'notice', '所选范围的基础资料尚未齐全，以下为暂定结果。缺失比赛可能改变队友名单和排名；再次采集将继续补缺。'));
+    for (const text of allReport.Notes) byId('notices').append(node('div', 'notice', text));
+    const teammates = aggregate(scope).filter(t => t.Matches >= threshold);
+    const ids = new Set(teammates.map(t => t.AccountId));
+    const matches = scope.filter(m => m.Players.some(p => ids.has(p.AccountId)));
+    byId('selected-count').textContent = teammates.length + ' 人';
+    byId('together-count').textContent = number(matches.length) + ' 场';
+    const rankedCount = matches.filter(m => m.MmrChange !== null).length;
+    byId('together-split').textContent = `天梯 ${number(rankedCount)} / 普通 ${number(matches.length - rankedCount)}`;
+    byId('together-mmr').textContent = signed(matches.reduce((sum, m) => sum + (m.MmrChange ?? 0), 0)) + ' MMR';
+    byId('coverage').textContent = `区间内同队至少 ${threshold}局 · 综合表现有效评分 ${number(teammates.reduce((n, t) => n + t.ImpMatches, 0))}/${number(teammates.reduce((n, t) => n + t.Matches, 0))} 人次 · 各榜对应数据也需至少${threshold}局有效样本`;
+    for (const [id, good, title] of [['good-charts', true, '好表现榜'], ['bad-charts', false, '差表现榜']])
+      byId(id).replaceChildren(node('h2', '', title), ...metrics.filter(m => !!m.good === good).map(metric => drawChart(metric, teammates, threshold)));
+    byId('table-summary').textContent = `查看筛选后的全部 ${teammates.length}名队友及计算样本`;
+    byId('teammates').replaceChildren(...teammates.map(t => {
+      const row = node('tr');
+      const name = node('td', '', t.Name);
+      name.append(node('br'), node('small', '', t.AccountId));
+      row.append(name);
+      const mmr = t.RankedMatches ? [signed(t.MmrGain), '−' + number(t.MmrLoss), signed(t.NetMmr), `${signed(t.ActualMmr)} / ${t.ActualMatches}`, `${signed(t.EstimatedMmr)} / ${t.EstimatedMatches}`] : ['—', '—', '—', '—', '—'];
+      for (const text of [`${t.Matches}（天梯 ${t.RankedMatches} / 普通 ${t.NormalMatches}）`, number(t.WinRate * 100, 1) + '%', `${cellNumber(t.AverageImp)} / ${t.ImpMatches}`, `${cellNumber(t.AverageDeaths)} / ${t.DeathMatches}`, `${cellNumber(t.AverageKillsAssists)} / ${t.KillAssistMatches}`, ...mmr]) row.append(node('td', '', text));
+      return row;
+    }));
+  }
+  range.addEventListener('input', () => { numeric.value = range.value; refresh(); });
+  numeric.addEventListener('change', refresh);
+  normal.addEventListener('change', refresh);
+  drawCurve();
+  render(allReport.DefaultMinimumMatches);
+})();
+</script>
+</html>

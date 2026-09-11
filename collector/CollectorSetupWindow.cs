@@ -9,7 +9,9 @@ internal sealed record CollectorSetupSelection(
     int HistoryMatches,
     string OutputRoot,
     bool GenerateReconstruction,
-    SteamLoginSelection Login);
+    SteamLoginSelection Login,
+    bool GenerateTeammates,
+    bool IncludeNormalMatches);
 
 internal sealed class CollectorSetupWindow : Form
 {
@@ -23,6 +25,8 @@ internal sealed class CollectorSetupWindow : Form
     private readonly NumericUpDown historyMatches = new();
     private readonly TextBox outputText = new();
     private readonly CheckBox reconstructionCheck = new();
+    private readonly CheckBox teammatesCheck = new();
+    private readonly CheckBox normalMatchesCheck = new();
 
     public CollectorSetupSelection? Selection { get; private set; }
 
@@ -30,8 +34,8 @@ internal sealed class CollectorSetupWindow : Form
     {
         Text = "Dota 2 MMR 曲线生成器";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(780, 720);
-        MinimumSize = new Size(720, 680);
+        ClientSize = new Size(780, 840);
+        MinimumSize = new Size(720, 760);
         Font = new Font("Microsoft YaHei UI", 10);
         FormBorderStyle = FormBorderStyle.Sizable;
 
@@ -107,6 +111,19 @@ internal sealed class CollectorSetupWindow : Form
         reconstructionCheck.Checked = true;
         reconstructionCheck.AutoSize = true;
         reconstructionCheck.Dock = DockStyle.Fill;
+        teammatesCheck.Text = "生成队友报告（首次需补下载比赛详情）";
+        teammatesCheck.Checked = true;
+        teammatesCheck.AutoSize = true;
+        teammatesCheck.Dock = DockStyle.Fill;
+        normalMatchesCheck.Text = "队友报告包含普通匹配（MMR曲线仍仅含天梯）";
+        normalMatchesCheck.AutoSize = true;
+        normalMatchesCheck.Dock = DockStyle.Fill;
+        reconstructionCheck.CheckedChanged += (_, _) =>
+        {
+            teammatesCheck.Enabled = reconstructionCheck.Checked;
+            normalMatchesCheck.Enabled = reconstructionCheck.Checked && teammatesCheck.Checked;
+        };
+        teammatesCheck.CheckedChanged += (_, _) => normalMatchesCheck.Enabled = reconstructionCheck.Checked && teammatesCheck.Checked;
         historyMatches.ValueChanged += (_, _) =>
         {
             reconstructionCheck.Enabled = historyMatches.Value > 0;
@@ -120,8 +137,9 @@ internal sealed class CollectorSetupWindow : Form
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(24, 12, 24, 8),
+            AutoScroll = true,
             ColumnCount = 3,
-            RowCount = 9,
+            RowCount = 11,
         };
         formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -134,7 +152,9 @@ internal sealed class CollectorSetupWindow : Form
         formGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         formGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         formGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        formGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        formGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
+        formGrid.RowStyles.Insert(8, new RowStyle(SizeType.Absolute, 48));
+        formGrid.RowStyles.Insert(9, new RowStyle(SizeType.Absolute, 48));
 
         formGrid.Controls.Add(FieldLabel("Steam ID"), 0, 0);
         formGrid.Controls.Add(accountText, 1, 0);
@@ -171,6 +191,10 @@ internal sealed class CollectorSetupWindow : Form
         formGrid.Controls.Add(browseButton, 2, 6);
         formGrid.Controls.Add(reconstructionCheck, 1, 7);
         formGrid.SetColumnSpan(reconstructionCheck, 2);
+        formGrid.Controls.Add(teammatesCheck, 1, 8);
+        formGrid.SetColumnSpan(teammatesCheck, 2);
+        formGrid.Controls.Add(normalMatchesCheck, 1, 9);
+        formGrid.SetColumnSpan(normalMatchesCheck, 2);
         var outputExplanation = new Label
         {
             Text = "建议使用上面的默认目录，并在以后运行时始终保持同一个固定根目录。\n" +
@@ -181,7 +205,7 @@ internal sealed class CollectorSetupWindow : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
         };
-        formGrid.Controls.Add(outputExplanation, 1, 8);
+        formGrid.Controls.Add(outputExplanation, 1, 10);
         formGrid.SetColumnSpan(outputExplanation, 2);
 
         var cancelButton = new Button
@@ -312,7 +336,9 @@ internal sealed class CollectorSetupWindow : Form
                 Decimal.ToInt32(historyMatches.Value),
                 outputRoot,
                 reconstructionCheck.Checked && historyMatches.Value > 0,
-                login);
+                login,
+                teammatesCheck.Checked && reconstructionCheck.Checked && historyMatches.Value > 0,
+                normalMatchesCheck.Checked && teammatesCheck.Checked && reconstructionCheck.Checked && historyMatches.Value > 0);
             usernameText.Clear();
             passwordText.Clear();
             DialogResult = DialogResult.OK;
@@ -348,7 +374,10 @@ internal static class CompletionDialog
         bool succeeded,
         string outputDirectory,
         string? error,
-        bool generatedReconstruction)
+        bool generatedReconstruction,
+        string? teammateStatus = null,
+        IReadOnlyList<string>? reconstructionNotices = null,
+        string? teammateReportPath = null)
     {
         if (!succeeded)
         {
@@ -360,23 +389,36 @@ internal static class CompletionDialog
             return;
         }
 
-        var choice = MessageBox.Show(
-            (generatedReconstruction
-                ? "下载和曲线生成已经完成。\n\n"
-                : "原始 GC 数据下载已经完成。\n\n") +
-            $"输出目录：{outputDirectory}\n\n" +
-            (generatedReconstruction
-                ? "点击“是”打开输出目录；可查看 PNG、英雄贡献 TXT/MD/XLSX，或双击交互 HTML。"
-                : "点击“是”打开输出目录。"),
-            "Dota 2 MMR 曲线生成器",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Information);
-        if (choice == DialogResult.Yes)
+        var page = new TaskDialogPage
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", outputDirectory)
+            Caption = "Dota 2 MMR 曲线生成器",
+            Heading = generatedReconstruction ? "报告已生成，可以直接打开查看" : "原始 GC 数据下载完成",
+            Text = $"输出目录：{outputDirectory}\n\n" +
+                (reconstructionNotices is { Count: > 0 } ? string.Join("\n", reconstructionNotices) + "\n\n" : "") +
+                (teammateStatus is null ? "" : teammateStatus + "\n\n") +
+                "下次也可以进入上面的文件夹，双击 HTML 文件查看报告。",
+            AllowCancel = true,
+            SizeToContent = true,
+        };
+        if (teammateReportPath is not null && File.Exists(teammateReportPath))
+            AddOpenButton("打开队友报告", "从天梯分数图选择范围，查看综合表现、胜率及上分下分榜单", teammateReportPath);
+        var mmrPath = Path.Combine(outputDirectory, "mmr-history.html");
+        if (generatedReconstruction && File.Exists(mmrPath))
+            AddOpenButton("打开 MMR 曲线", "查看天梯分数变化与逐场记录", mmrPath);
+        AddOpenButton("打开输出文件夹", "查看或分享 HTML、PNG、Excel 等结果文件", outputDirectory);
+        page.Buttons.Add(TaskDialogButton.Close);
+        TaskDialog.ShowDialog(page);
+
+        void AddOpenButton(string text, string description, string path)
+        {
+            var button = new TaskDialogCommandLinkButton(text, description) { AllowCloseDialog = false };
+            button.Click += (_, _) =>
             {
-                UseShellExecute = true,
-            });
+                try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+                catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException)
+                { MessageBox.Show($"无法自动打开，请在文件夹中手动查看：\n{path}", "打开报告", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            };
+            page.Buttons.Add(button);
         }
     }
 }

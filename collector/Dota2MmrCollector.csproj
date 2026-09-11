@@ -8,7 +8,7 @@
     <AssemblyName>Dota2MmrReconstructor</AssemblyName>
     <RootNamespace>Dota2MmrCollector</RootNamespace>
     <Product>Dota 2 MMR Reconstructor</Product>
-    <Version>0.4.1</Version>
+    <Version>0.5.5</Version>
     <Description>Download authenticated Dota 2 GC history and generate a reconstructed MMR curve.</Description>
     <RepositoryUrl>https://github.com/BCSZSZ/dota2-mmr-reconstructor</RepositoryUrl>
     <PublishSingleFile>false</PublishSingleFile>
@@ -19,12 +19,17 @@
     <PackageReference Include="QRCoder" Version="1.4.3" />
     <PackageReference Include="SteamKit2" Version="3.0.0" />
     <PackageReference Include="System.Resources.Extensions" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Dota2MmrCollector.Tests" />
     <EmbeddedResource Include="..\tools\mmr-table-viewer.html"
                       Link="Assets\mmr-table-viewer.html"
                       LogicalName="Dota2MmrCollector.Assets.mmr-table-viewer.html" />
+    <EmbeddedResource Include="..\tools\teammate-report-viewer.html"
+                      Link="Assets\teammate-report-viewer.html"
+                      LogicalName="Dota2MmrCollector.Assets.teammate-report-viewer.html" />
     <None Include="README.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="licenses\SteamKit2-LGPL-2.1.txt" CopyToOutputDirectory="PreserveNewest" />
