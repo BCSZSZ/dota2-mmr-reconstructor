@@ -12,7 +12,7 @@ namespace Dota2MmrCollector;
 
 internal static class MmrReconstructor
 {
-    public const string ModelVersion = "endpoint-constrained-glicko-dd-v2-csharp";
+    public const string ModelVersion = "endpoint-constrained-glicko-dd-v3-csharp";
 
     private static readonly DateTimeOffset SingleRankStart =
         new(2020, 3, 2, 0, 0, 0, TimeSpan.Zero);
@@ -33,6 +33,7 @@ internal static class MmrReconstructor
         "normal_rank_change_prior", "unconstrained_rank_change", "endpoint_correction",
         "modeled_rank_change", "curve_mmr_before", "curve_mmr_after",
         "segment_endpoint_mmr", "segment_endpoint_source", "anchor_jump_before", "curve_source",
+        "curve_break_before", "gap_endpoint_time",
     ];
 
     public static ReconstructionOutput Run(
@@ -49,7 +50,8 @@ internal static class MmrReconstructor
             segments,
             confidence,
             source.Anchor.CurrentMmr,
-            doubleDown);
+            doubleDown,
+            source.Anchor.ObservedAtUnix);
         if (rows.Count == 0)
         {
             throw new InvalidDataException("没有带绝对 MMR 锚点的天梯记录可供绘图。");
@@ -68,8 +70,10 @@ internal static class MmrReconstructor
         var datasetPath = Path.Combine(outputDirectory, "mmr-dataset.json");
         var htmlPath = Path.Combine(outputDirectory, "mmr-history.html");
 
-        var hiddenRows = rows.Where(row => GetBoolean(row, "mmr_fields_visible") is false).ToList();
-        var actualRows = rows.Count - hiddenRows.Count;
+        var unresolvedCount = rows.Count(row => row["modeled_rank_change"] is null);
+        var hiddenRows = rows.Where(row => GetBoolean(row, "mmr_fields_visible") is false
+            && row["modeled_rank_change"] is not null).ToList();
+        var actualRows = rows.Count - hiddenRows.Count - unresolvedCount;
         var segmentSummaries = BuildSegmentSummaries(segments, source.Anchor.CurrentMmr, rows);
         var endpointResiduals = segmentSummaries
             .Where(item => item["reconstructed_end_mmr"] is not null)
@@ -130,9 +134,11 @@ internal static class MmrReconstructor
                 ["matches"] = rows.Count,
                 ["actual_gc_matches"] = actualRows,
                 ["endpoint_constrained_matches"] = hiddenRows.Count,
-                ["hidden_segments"] = endpointResiduals.Count,
+                ["unresolved_matches"] = unresolvedCount,
+                ["hidden_segments"] = segmentSummaries.Count,
+                ["unresolved_segments"] = segmentSummaries.Count(item => Equals(item["status"], "unresolved_endpoint")),
                 ["endpoint_residuals"] = endpointResiduals,
-                ["all_hidden_endpoints_exact"] = endpointResiduals.All(item => Convert.ToInt32(item["residual"], CultureInfo.InvariantCulture) == 0),
+                ["all_hidden_endpoints_exact"] = unresolvedCount == 0 && endpointResiduals.All(item => Convert.ToInt32(item["residual"], CultureInfo.InvariantCulture) == 0),
                 ["method"] = "Glicko-shaped prior + latent Double Down probabilities + sign-preserving integer endpoint projection",
             },
             ["caveat"] = "低 Rank Confidence 区间逐局变化是端点约束拟合，不是 Valve 服务器逐局真值。",
@@ -140,7 +146,7 @@ internal static class MmrReconstructor
 
         var dataset = new Dictionary<string, object?>
         {
-            ["schema_version"] = 1,
+            ["schema_version"] = 2,
             ["account_id"] = source.AccountId,
             ["model_version"] = ModelVersion,
             ["input_source"] = "authenticated_gc_match_history",
@@ -166,6 +172,8 @@ internal static class MmrReconstructor
         var savedWorkbookPath = HeroContributionSupplementaryReports.WriteWorkbook(heroWorkbookPath, heroReport);
         string[] notices = savedWorkbookPath == heroWorkbookPath ? [] :
             [$"原Excel文件无法覆盖（可能被占用或只读），已另存为：{Path.GetFileName(savedWorkbookPath)}"];
+        if (unresolvedCount > 0)
+            notices = [.. notices, $"{unresolvedCount}场隐藏比赛无法满足端点约束，分差留空、曲线断开，未计入英雄及队友统计。原始记录和真实锚点保留。"];
         heroWorkbookPath = savedWorkbookPath;
         WriteStandaloneHtml(htmlPath, dataset, source.AccountId);
 
@@ -764,7 +772,8 @@ internal static class MmrReconstructor
         IReadOnlyList<HiddenSegment> segments,
         ConfidenceFit confidence,
         int currentMmr,
-        DoubleDownFit doubleDown)
+        DoubleDownFit doubleDown,
+        long observedAtUnix)
     {
         var indexByMatch = timeline.Select((match, index) => (match.MatchId, index))
             .ToDictionary(pair => pair.MatchId, pair => pair.index);
@@ -814,6 +823,26 @@ internal static class MmrReconstructor
                 }
 
                 var targetChange = endpointMmr.Value - startMmr;
+                var wins = segment.Matches.Count(item => item.Won);
+                var losses = segment.Matches.Count - wins;
+                if (targetChange < wins * 10 - losses * 240 || targetChange > wins * 240 - losses * 10)
+                {
+                    foreach (var hidden in segment.Matches)
+                    {
+                        var gap = CreateRow(hidden, false, "unknown", null, null, null, segment.Number,
+                            null, null, null, false, null, null, "unknown", null, null, null,
+                            null, null, null, endpointMmr, endpointSource, 0,
+                            "无法重建：端点变化超出模型范围；逐场分差未知");
+                        gap["likely_double_down"] = null;
+                        gap["anchor_jump_before"] = null;
+                        rows.Add(gap);
+                    }
+                    rows[^1]["gap_endpoint_time"] = segment.NextVisible?.StartedAt.ToUnixTimeSeconds() ?? observedAtUnix;
+                    // Neither a per-match change nor a calibration jump can be inferred here.
+                    curveMmr = null;
+                    index += segment.Matches.Count;
+                    continue;
+                }
                 var crossesTransition = segment.PreviousVisible.StartedAt < GlickoStart
                     && segment.Matches[0].StartedAt >= GlickoStart;
                 var probabilities = crossesTransition
@@ -873,6 +902,7 @@ internal static class MmrReconstructor
                 throw new InvalidDataException($"隐藏比赛 {match.MatchId} 未归入区间。");
             }
             var actual = match.Reported;
+            var followsGap = rows.Count > 0 && rows[^1]["modeled_rank_change"] is null;
             if (match.StartedAt < GlickoStart)
             {
                 var jump = curveMmr is null ? 0 : actual.StartMmr - curveMmr.Value;
@@ -908,6 +938,7 @@ internal static class MmrReconstructor
                 normalVisible, priorVisible, actual.RankChange - priorVisible,
                 actual.RankChange, actual.StartMmr, actual.EndMmr, null, null,
                 anchorJump, "GC actual"));
+            if (followsGap) rows[^1]["curve_break_before"] = true;
             index++;
         }
         return rows;
@@ -931,9 +962,9 @@ internal static class MmrReconstructor
         double? normalPrior,
         double? unconstrained,
         double? endpointCorrection,
-        int modeledDelta,
-        int before,
-        int after,
+        int? modeledDelta,
+        int? before,
+        int? after,
         int? endpointMmr,
         string? endpointSource,
         int anchorJump,
@@ -969,6 +1000,8 @@ internal static class MmrReconstructor
             ["segment_endpoint_source"] = endpointSource,
             ["anchor_jump_before"] = anchorJump,
             ["curve_source"] = source,
+            ["curve_break_before"] = false,
+            ["gap_endpoint_time"] = null,
         };
 
     private static List<Dictionary<string, object?>> BuildSegmentSummaries(
@@ -984,12 +1017,14 @@ internal static class MmrReconstructor
             var segmentRows = rows.Where(row =>
                 row["segment"] is not null
                 && Convert.ToInt32(row["segment"], CultureInfo.InvariantCulture) == segment.Number).ToList();
-            var reconstructed = segmentRows.Count > 0
+            var reconstructed = segmentRows.Count > 0 && segmentRows[^1]["curve_mmr_after"] is not null
                 ? Convert.ToInt32(segmentRows[^1]["curve_mmr_after"], CultureInfo.InvariantCulture)
                 : (int?)null;
             summaries.Add(new Dictionary<string, object?>
             {
                 ["number"] = segment.Number,
+                ["status"] = segmentRows.Any(row => row["modeled_rank_change"] is null)
+                    ? "unresolved_endpoint" : reconstructed is null ? "missing_start_anchor" : "endpoint_constrained",
                 ["start"] = segment.Matches[0].StartedAt.ToString("O", CultureInfo.InvariantCulture),
                 ["end"] = segment.Matches[^1].StartedAt.ToString("O", CultureInfo.InvariantCulture),
                 ["matches"] = segment.Matches.Count,
@@ -1005,7 +1040,7 @@ internal static class MmrReconstructor
                 ["reconstructed_end_mmr"] = reconstructed,
                 ["endpoint_residual"] = endpoint is not null && reconstructed is not null
                     ? reconstructed - endpoint : null,
-                ["expected_double_downs"] = segmentRows.Sum(row =>
+                ["expected_double_downs"] = reconstructed is null ? null : (double?)segmentRows.Sum(row =>
                     row["double_down_probability"] is null
                         ? 0 : Convert.ToDouble(row["double_down_probability"], CultureInfo.InvariantCulture)),
             });
@@ -1053,11 +1088,32 @@ internal static class MmrReconstructor
         WriteTextAtomically(path, viewer.Replace(marker, embedded + Environment.NewLine + "  " + marker, StringComparison.Ordinal), new UTF8Encoding(false));
     }
 
+    private static IReadOnlyList<Dictionary<string, object?>> PlotRows(IReadOnlyList<Dictionary<string, object?>> rows)
+    {
+        var points = new List<Dictionary<string, object?>>();
+        foreach (var row in rows)
+        {
+            if (row["curve_mmr_after"] is not null) points.Add(row);
+            else if (row.GetValueOrDefault("gap_endpoint_time") is long time)
+                points.Add(new Dictionary<string, object?>(row)
+                {
+                    ["unix_time"] = time,
+                    ["curve_mmr_before"] = row["segment_endpoint_mmr"],
+                    ["curve_mmr_after"] = row["segment_endpoint_mmr"],
+                    ["mmr_fields_visible"] = true,
+                    ["curve_break_before"] = true,
+                });
+        }
+        return points;
+    }
+
     private static void WriteSvg(
         string path,
         uint accountId,
         IReadOnlyList<Dictionary<string, object?>> rows)
     {
+        var unresolved = rows.Count(row => row["modeled_rank_change"] is null);
+        rows = PlotRows(rows);
         const int width = 1400;
         const int height = 720;
         const int left = 82;
@@ -1072,20 +1128,22 @@ internal static class MmrReconstructor
         var maxMmr = Math.Max(minMmr + 100, values.Max() + 50);
         double X(long time) => left + (time - minTime) / (double)(maxTime - minTime) * (width - left - right);
         double Y(int mmr) => top + (maxMmr - mmr) / (double)(maxMmr - minMmr) * (height - top - bottom);
-        var points = string.Join(" ", times.Zip(values).Select(pair =>
-            $"{X(pair.First):0.##},{Y(pair.Second):0.##}"));
+        var points = string.Join(" ", rows.Select((row, i) =>
+            $"{(i == 0 || GetBoolean(row, "curve_break_before") is true ? "M" : "L")}{X(times[i]):0.##},{Y(values[i]):0.##}"));
+        var anchors = string.Join("", rows.Select((row, i) => row.GetValueOrDefault("gap_endpoint_time") is not null
+            ? $"<circle cx=\"{X(times[i]):0.##}\" cy=\"{Y(values[i]):0.##}\" r=\"3\" fill=\"#1976d2\"/>" : ""));
         var svg = $"""
             <svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
               <rect width="100%" height="100%" fill="#f8fafc"/>
               <text x="{left}" y="32" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600">Dota 2 MMR — {accountId}</text>
               <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#94a3b8"/>
               <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#94a3b8"/>
-              <polyline fill="none" stroke="#1976d2" stroke-width="2" points="{points}"/>
+              <path fill="none" stroke="#1976d2" stroke-width="2" d="{points}"/>{anchors}
               <text x="18" y="{top}" font-family="Segoe UI, sans-serif" font-size="14">{maxMmr}</text>
               <text x="18" y="{height - bottom}" font-family="Segoe UI, sans-serif" font-size="14">{minMmr}</text>
               <text x="{left}" y="{height - 24}" font-family="Segoe UI, sans-serif" font-size="13">{DateTimeOffset.FromUnixTimeSeconds(minTime):yyyy-MM-dd}</text>
               <text x="{width - right - 90}" y="{height - 24}" font-family="Segoe UI, sans-serif" font-size="13">{DateTimeOffset.FromUnixTimeSeconds(maxTime):yyyy-MM-dd}</text>
-              <text x="{left}" y="{height - 5}" font-family="Segoe UI, sans-serif" font-size="12" fill="#64748b">真实点与拟合点的详细区分请查看 mmr-history.html</text>
+              <text x="{left}" y="{height - 5}" font-family="Segoe UI, sans-serif" font-size="12" fill="#64748b">{unresolved}场分差未知（断线）；真实点与拟合点详见 mmr-history.html</text>
             </svg>
             """;
         WriteTextAtomically(path, svg, new UTF8Encoding(false));
@@ -1096,6 +1154,10 @@ internal static class MmrReconstructor
         uint accountId,
         IReadOnlyList<Dictionary<string, object?>> rows)
     {
+        var unresolved = rows.Count(row => row["modeled_rank_change"] is null);
+        var matchCount = rows.Count;
+        var actualCount = rows.Count(row => GetBoolean(row, "mmr_fields_visible") is true);
+        rows = PlotRows(rows);
         const int width = 2300;
         const int height = 1250;
         const float left = 156;
@@ -1170,8 +1232,8 @@ internal static class MmrReconstructor
             left,
             8);
         graphics.DrawString(
-            $"{start:yyyy-MM} to {end:yyyy-MM} · {rows.Count:N0} ranked matches · "
-            + $"{rows.Count - modeledCount:N0} GC actual · {modeledCount:N0} endpoint-constrained",
+            $"{start:yyyy-MM} to {end:yyyy-MM} · {matchCount:N0} ranked matches · "
+            + $"{actualCount:N0} GC actual · {modeledCount:N0} endpoint-constrained · {unresolved} unknown (gaps)",
             subtitleFont,
             mutedBrush,
             left,
@@ -1235,8 +1297,17 @@ internal static class MmrReconstructor
             var y = Y(values[index]);
             var modeled = GetBoolean(row, "mmr_fields_visible") is false;
             var pen = modeled ? modeledPen : actualPen;
-            graphics.DrawLine(pen, previousX, previousY, x, previousY);
-            graphics.DrawLine(pen, x, previousY, x, y);
+            if (GetBoolean(row, "curve_break_before") is not true)
+            {
+                graphics.DrawLine(pen, previousX, previousY, x, previousY);
+                graphics.DrawLine(pen, x, previousY, x, y);
+            }
+            else
+            {
+                graphics.DrawEllipse(actualPen, x - 3, y - 3, 6, 6);
+                if (row["modeled_rank_change"] is not null)
+                    graphics.DrawLine(pen, x, Y(Convert.ToInt32(row["curve_mmr_before"], CultureInfo.InvariantCulture)), x, y);
+            }
             if (modeled
                 && row["double_down_probability"] is not null
                 && Convert.ToDouble(row["double_down_probability"], CultureInfo.InvariantCulture) >= 0.20)
@@ -1291,6 +1362,7 @@ internal static class MmrReconstructor
         IReadOnlyList<Dictionary<string, object?>> rows)
     {
         var contributions = rows
+            .Where(row => row["modeled_rank_change"] is not null)
             .GroupBy(row => Convert.ToInt32(row["hero_id"], CultureInfo.InvariantCulture))
             .Select(group =>
             {
@@ -1317,8 +1389,8 @@ internal static class MmrReconstructor
             accountId,
             Convert.ToString(rows[0]["date_utc"], CultureInfo.InvariantCulture)!,
             Convert.ToString(rows[^1]["date_utc"], CultureInfo.InvariantCulture)!,
-            rows.Count,
-            contributions);
+            rows.Count(row => row["modeled_rank_change"] is not null),
+            contributions) { UnresolvedMatches = rows.Count(row => row["modeled_rank_change"] is null) };
 
         static int RankChange(Dictionary<string, object?> row) =>
             Convert.ToInt32(row["modeled_rank_change"], CultureInfo.InvariantCulture);
@@ -1332,6 +1404,7 @@ internal static class MmrReconstructor
         builder.AppendLine($"账号 ID32：{report.AccountId}");
         builder.AppendLine($"区间：{report.StartUtc} 至 {report.EndUtc}");
         builder.AppendLine($"天梯比赛：{report.Matches:N0}；出现英雄：{contributions.Count:N0}");
+        if (report.UnresolvedMatches > 0) builder.AppendLine(report.UnresolvedNote);
         builder.AppendLine(
             $"总贡献：{Signed(contributions.Sum(item => item.TotalContribution))} MMR；"
             + $"GC 真实：{Signed(contributions.Sum(item => item.ActualContribution))}；"
@@ -1378,7 +1451,7 @@ internal static class MmrReconstructor
     {
         var fields = new[]
         {
-            "number", "start", "end", "matches", "wins", "losses", "observed_total_change",
+            "number", "status", "start", "end", "matches", "wins", "losses", "observed_total_change",
             "endpoint_source", "previous_visible_end_mmr", "next_visible_start_mmr",
             "endpoint_mmr", "reconstructed_end_mmr", "endpoint_residual", "expected_double_downs",
         };
@@ -1628,6 +1701,8 @@ internal sealed record HeroContributionReport(
     int Matches,
     IReadOnlyList<HeroContribution> Contributions)
 {
+    public int UnresolvedMatches { get; init; }
+    public string UnresolvedNote => $"另有{UnresolvedMatches}场端点异常比赛分差未知，未计入本表场次、胜率和MMR贡献。";
     public int TotalContribution => Contributions.Sum(item => item.TotalContribution);
 
     public int ActualContribution => Contributions.Sum(item => item.ActualContribution);

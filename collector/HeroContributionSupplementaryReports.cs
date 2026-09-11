@@ -28,6 +28,7 @@ internal static class HeroContributionSupplementaryReports
         builder.AppendLine($"- 账号 ID32：{report.AccountId}");
         builder.AppendLine($"- 区间：{report.StartUtc} 至 {report.EndUtc}");
         builder.AppendLine($"- 天梯比赛：{report.Matches:N0}");
+        if (report.UnresolvedMatches > 0) builder.AppendLine($"- {report.UnresolvedNote}");
         builder.AppendLine($"- 出现英雄：{report.Contributions.Count:N0}");
         builder.AppendLine($"- 总贡献：{Signed(report.TotalContribution)} MMR");
         builder.AppendLine($"- GC 真实贡献：{Signed(report.ActualContribution)} MMR");
@@ -167,6 +168,7 @@ internal static class HeroContributionSupplementaryReports
 
     private static void WriteNotesSheet(IXLWorksheet worksheet, HeroContributionReport report)
     {
+        if (report.UnresolvedMatches > 0) worksheet.Cell(18, 2).Value = report.UnresolvedNote;
         worksheet.Cell("A1").Value = "Dota 2 MMR 英雄贡献统计";
         worksheet.Range("A1:B1").Merge();
         worksheet.Cell("A1").Style.Font.Bold = true;

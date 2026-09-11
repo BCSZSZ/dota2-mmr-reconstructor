@@ -1,8 +1,9 @@
 # Low-Confidence reconstruction model
 
 The production path is implemented in C# inside `Dota2MmrReconstructor.exe`; the Python
-implementation remains as a research/reference implementation. Both use the same v2 curve logic,
-and the C# model identifies itself as `endpoint-constrained-glicko-dd-v2-csharp`.
+implementation remains a v2 research/reference implementation. The production C# model now
+identifies itself as `endpoint-constrained-glicko-dd-v3-csharp`; feasible segments retain the v2
+allocation algorithm, while infeasible segments are represented as unknown gaps.
 
 ## Problem boundary
 
@@ -79,6 +80,21 @@ integer deltas that:
 The final hidden segment uses the authenticated Current Rank as its endpoint. No observed GC row
 is overwritten.
 
+Starting with Windows v0.5.6, if the observed total falls outside the sign-preserving 10..240
+per-match bounds, reconstruction continues without estimating that segment. Dataset schema 2
+retains every affected match with null `modeled_rank_change`, `curve_mmr_before`,
+`curve_mmr_after`, and Double Down probability. The last unknown row carries
+`gap_endpoint_time` (Unix seconds at the next visible match, or the Current Rank observation)
+and `segment_endpoint_mmr`; viewers plot that observation as an isolated real anchor, never as
+the hidden match's settlement. `curve_break_before` marks the next real row. CSV blanks carry
+the same unknown meaning. Summaries report `unresolved_matches`, `unresolved_segments`, and
+`unresolved_endpoint` segment status, with null residuals and `all_hidden_endpoints_exact=false`.
+
+Hero and teammate reports disclose and exclude unresolved matches from their counts and
+statistics; teammate collection does not request those excluded matches. This deliberately
+does not assign any endpoint difference to heroes, teammates, or a purported calibration jump.
+An infeasible model does not prove that the source is corrupt or that calibration caused the gap.
+
 ## Interpretation
 
 - Exact endpoint residual of zero is a consistency condition, not an accuracy metric.
@@ -87,4 +103,4 @@ is overwritten.
 - The most valuable future validation data is a Current Rank snapshot immediately after each
   low-Confidence match.
 
-The executable collector intentionally does none of this modeling; it only preserves raw input.
+Raw GC files are preserved separately from all reconstruction outputs.

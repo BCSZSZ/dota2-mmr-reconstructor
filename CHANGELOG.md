@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.6 - 2026-09-11
+
+- Continue C# reconstruction when a hidden segment's observed endpoint change cannot satisfy the model's win/loss bounds.
+- Preserve affected matches in CSV/JSON with unknown deltas and curve values; show gaps and real endpoint markers in charts without inventing calibration changes or per-match contributions.
+- Disclose unresolved coverage in summaries, completion notices and hero/teammate reports; exclude unresolved matches from contribution statistics and teammate collection scope.
+- Add regression coverage for the 4-win/6-loss +915 case, incompatible all-win/all-loss segments and a trailing Current Rank anchor.
+- Keep GC request pacing, retries and caching unchanged.
+
 ## 0.5.5 - 2026-09-11
 
 - Align corresponding teammate chart cards in shared rows on desktop, including after filtering or text wrapping; preserve favorable-first ordering on mobile.

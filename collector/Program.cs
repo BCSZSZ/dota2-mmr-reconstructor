@@ -1128,6 +1128,7 @@ internal static class Program
     private static void WriteCachedTeammateReport(string accountDirectory, List<string> notes)
     {
         var output = reconstructionOutput!;
+        notes.AddRange(output.Notices.Where(note => note.Contains("端点约束")));
         var scope = ReadTeammateScope();
         var cache = new TeammateCache(accountDirectory, output.AccountId);
         var report = TeammateReport.Build(scope, cache, notes) with { IncludesNormalMatches = options.IncludeNormalMatches };

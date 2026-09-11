@@ -233,6 +233,7 @@
     let actual = '', estimated = '';
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1], b = points[i];
+      if (b.CurveBreakBefore) continue;
       const segment = `M${xScale(a.time).toFixed(2)},${y(a.CurveMmr).toFixed(2)}L${xScale(b.time).toFixed(2)},${y(b.CurveMmr).toFixed(2)}`;
       if (b.Estimated) estimated += segment; else actual += segment;
     }

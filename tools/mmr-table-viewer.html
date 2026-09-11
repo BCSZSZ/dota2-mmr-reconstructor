@@ -418,7 +418,7 @@
       anchor_jump_before: "锚点跳变", curve_source: "数据来源", unix_time: "Unix时间",
       average_rank: "平均奖章", party_size: "组队人数", confidence_proxy: "Confidence代理",
       confidence_regime: "Confidence区间", likely_double_down: "疑似DD",
-      model_version: "模型版本"
+      model_version: "模型版本", curve_break_before: "曲线断点", gap_endpoint_time: "真实端点观测时间（Unix秒）"
     };
     const DEFAULT_HIDDEN = new Set(["unix_time", "confidence_proxy", "likely_double_down"]);
     const NUMBER_HINTS = ["mmr", "rank", "change", "probability", "multiplier", "confidence", "uncertainty", "segment", "hero_id", "unix_time", "party_size"];
@@ -744,7 +744,15 @@
     }
 
     function updateChartData({fit = false} = {}) {
-      const points = state.filteredRows.map(chartPointFromRow).filter(Boolean).sort((a, b) => a.time - b.time || a.rowIndex - b.rowIndex);
+      const points = state.filteredRows.flatMap((row, index) => {
+        const point = chartPointFromRow(row, index);
+        if (point) return [point];
+        const time = toNumber(row.gap_endpoint_time), mmr = toNumber(row.segment_endpoint_mmr);
+        return Number.isFinite(time) && Number.isFinite(mmr)
+          ? [{time: time * 1000, mmr, before: NaN, change: NaN, source: "actual", row, rowIndex: index, anchor: true}] : [];
+      }).sort((a, b) => a.time - b.time || a.rowIndex - b.rowIndex);
+      state.chart.gaps = state.rows.filter(row => String(row.curve_source).startsWith("无法重建"))
+        .map(row => Date.parse(row.date_utc));
       state.chart.points = points;
       if (!points.length) {
         state.chart.fullX = state.chart.fullY = state.chart.viewX = state.chart.viewY = null;
@@ -860,14 +868,16 @@
         let actualPath = "", modeledPath = "";
         for (let index = 1; index < visiblePoints.length; index += 1) {
           const previous = visiblePoints[index - 1], point = visiblePoints[index];
+          if (point.anchor || state.chart.gaps.some(time => time > previous.time && time <= point.time)) continue;
           const command = `M${xScale(previous.time).toFixed(2)},${yScale(previous.mmr).toFixed(2)}L${xScale(point.time).toFixed(2)},${yScale(point.mmr).toFixed(2)}`;
           if (point.source === "modeled") modeledPath += command; else actualPath += command;
         }
         const seriesGroup = createSvgElement("g", {"clip-path": "url(#chartPlotClip)"});
         if (els.chartActualToggle.checked && actualPath) seriesGroup.append(createSvgElement("path", {class: "series-actual", d: actualPath}));
         if (els.chartModeledToggle.checked && modeledPath) seriesGroup.append(createSvgElement("path", {class: "series-modeled", d: modeledPath}));
-        if (visiblePoints.length <= 300) {
+        {
           for (const point of visiblePoints) {
+            if (visiblePoints.length > 300 && !point.anchor) continue;
             if ((point.source === "actual" && !els.chartActualToggle.checked) || (point.source === "modeled" && !els.chartModeledToggle.checked)) continue;
             seriesGroup.append(createSvgElement("circle", {class: point.source === "modeled" ? "point-modeled" : "point-actual", cx: xScale(point.time), cy: yScale(point.mmr), r: 2.3}));
           }
@@ -879,7 +889,7 @@
           createSvgElement("rect", {class: "interaction-layer", x: plot.left, y: plot.top, width: plot.width, height: plot.height})
         );
         const from = new Date(x0).toISOString().slice(0, 10), to = new Date(x1).toISOString().slice(0, 10);
-        els.chartMeta.textContent = `${from} → ${to} · MMR ${Math.round(y0).toLocaleString()}–${Math.round(y1).toLocaleString()} · 视窗内 ${Math.max(0, end - start).toLocaleString()} 场；滚轮缩放时间轴，Ctrl + 滚轮缩放 MMR，拖动平移。`;
+        els.chartMeta.textContent = `${from} → ${to} · MMR ${Math.round(y0).toLocaleString()}–${Math.round(y1).toLocaleString()} · 视窗内 ${Math.max(0, end - start).toLocaleString()} 个点；${state.chart.gaps.length} 场端点异常，分差未知、曲线断开，未计入贡献统计。滚轮缩放，拖动平移。`;
         hideChartTooltip();
       });
     }
@@ -936,6 +946,7 @@
       const result = formatValue("result", point.row.result, point.row);
       const matchId = firstValue(point.row, ["match_id", "MatchID", "Match ID"]);
       details.textContent = `${result === "undefined" ? "" : result} · 变化 ${delta}${matchId ? ` · Match ${matchId}` : ""}`;
+      if (point.anchor) details.textContent = "真实端点观测（非该场结算）；隐藏区间逐场分差未知。";
       els.chartTooltip.replaceChildren(title, source, details); els.chartTooltip.classList.remove("hidden");
       const tooltipWidth = els.chartTooltip.offsetWidth, tooltipHeight = els.chartTooltip.offsetHeight;
       els.chartTooltip.style.left = `${Math.max(8, Math.min(rect.width - tooltipWidth - 8, pointX + 12))}px`;

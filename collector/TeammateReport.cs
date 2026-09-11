@@ -9,6 +9,7 @@ internal sealed record TeammateMatch(ulong MatchId, string DateUtc, bool Won, in
 {
     public bool IsRanked => MmrChange.HasValue;
     public int? CurveMmr { get; init; }
+    public bool CurveBreakBefore { get; init; }
 }
 internal sealed record TeammatePlayer(uint? AccountId, uint? Slot, int? HeroId, string? Name,
     uint? Kills, uint? Deaths, uint? Assists);
@@ -111,7 +112,10 @@ internal sealed class TeammateStats(uint accountId)
 
 internal sealed record TeammateReportPlayer(uint AccountId, uint? Deaths, long? KillsAssists, short? Imp);
 internal sealed record TeammateReportMatch(string MatchId, string DateUtc, bool Won, int? MmrChange,
-    bool Estimated, int? CurveMmr, bool Cached, bool Complete, IReadOnlyList<TeammateReportPlayer> Players);
+    bool Estimated, int? CurveMmr, bool Cached, bool Complete, IReadOnlyList<TeammateReportPlayer> Players)
+{
+    public bool CurveBreakBefore { get; init; }
+}
 
 internal sealed record TeammateReportData(uint AccountId, int ScopeMatches, int CachedMatches,
     int CompleteMatches, int TogetherMatches, long TogetherNetMmr, int ScoredPlayerMatches,
@@ -136,11 +140,14 @@ internal static class TeammateReport
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(outputDirectory, "mmr-dataset.json")));
         if (doc.RootElement.GetProperty("account_id").GetUInt32() != accountId)
             throw new InvalidDataException("队友报告与MMR数据的账号不一致。");
-        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => new TeammateMatch(
+        var rows = doc.RootElement.GetProperty("rows").EnumerateArray()
+            .Where(r => r.GetProperty("modeled_rank_change").ValueKind == JsonValueKind.Number)
+            .Select(r => new TeammateMatch(
             ulong.Parse(r.GetProperty("match_id").GetString()!, CultureInfo.InvariantCulture),
             r.GetProperty("date_utc").GetString()!, r.GetProperty("result").GetString() == "Win",
             r.GetProperty("modeled_rank_change").GetInt32(), !r.GetProperty("mmr_fields_visible").GetBoolean())
-            { CurveMmr = r.GetProperty("curve_mmr_after").GetInt32() }).ToArray();
+            { CurveMmr = r.GetProperty("curve_mmr_after").GetInt32(),
+                CurveBreakBefore = r.TryGetProperty("curve_break_before", out var gap) && gap.GetBoolean() }).ToArray();
         if (rows.Select(r => r.MatchId).Distinct().Count() != rows.Length)
             throw new InvalidDataException("MMR比赛ID重复，停止队友统计。");
         if (collectionPath is null) return rows;
@@ -188,7 +195,8 @@ internal static class TeammateReport
                 match.MmrChange, match.Estimated, match.CurveMmr, details[match.MatchId] is not null,
                 details[match.MatchId]?.Complete == true, allies.Select(p => new TeammateReportPlayer(
                     p.AccountId!.Value, p.Deaths, p.Kills is { } k && p.Assists is { } a ? (long)k + a : null,
-                    imp?.Players.GetValueOrDefault(p.AccountId!.Value))).ToArray()));
+                    imp?.Players.GetValueOrDefault(p.AccountId!.Value))).ToArray())
+                { CurveBreakBefore = match.CurveBreakBefore });
             foreach (var p in allies)
             {
                 var id = p.AccountId!.Value;

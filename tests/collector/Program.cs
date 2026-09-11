@@ -4,6 +4,7 @@ using Dota2MmrCollector;
 using SteamKit2.GC.Dota.Internal;
 
 var root = Path.Combine(Path.GetTempPath(), "dota2-teammates-test-" + Guid.NewGuid().ToString("N"));
+EndpointGapTests.Run(root);
 var cache = new TeammateCache(root, 1);
 var scope = Enumerable.Range(1, 12).Select(i => new TeammateMatch((ulong)i,
     $"2026-01-{i:00}", i <= 9, i <= 9 ? 25 : -25, i > 10)
