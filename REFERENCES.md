@@ -28,6 +28,11 @@ ShowMMR reference revision used during development:
   to submit a user-entered Steam Guard code.
 - [SteamDatabase/GameTracking-Dota2](https://github.com/SteamDatabase/GameTracking-Dota2)
   publishes tracked Dota 2 protobuf schemas used to identify Rank and Match History fields.
+- [OpenDota API](https://api.opendota.com/api) supplies the best-effort public-data expansion
+  for the practice-match report. The collector queries only the authenticated account and the
+  identifiable teammates found in that account's GC seed matches, filters the requested dates
+  locally, and retains per-match source labels. A paid API key changes quota but cannot make an
+  unparsed or private match available.
 - [Valve: The New Frontiers Update](https://www.dota2.com/newfrontiers) describes the 2023
   switch to a Glicko-family rating system and Rank Confidence. Valve does not publish the
   server's complete MMR or confidence update formula.
@@ -41,7 +46,7 @@ ShowMMR reference revision used during development:
 - [protobuf-net](https://github.com/protobuf-net/protobuf-net), Apache-2.0, is used transitively
   by SteamKit2.
 - [ClosedXML](https://github.com/ClosedXML/ClosedXML), MIT, writes the typed and filterable
-  hero-contribution XLSX report. Its redistributed runtime dependencies are listed in
+  hero-contribution and practice-match XLSX reports. Its redistributed runtime dependencies are listed in
   `collector/THIRD_PARTY_NOTICES.md`.
 
 See `collector/THIRD_PARTY_NOTICES.md` for the collector release notices.

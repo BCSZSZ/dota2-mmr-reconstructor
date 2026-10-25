@@ -12,6 +12,7 @@ into this repository.
 - RBush.Signed 4.0.0 — MIT — <https://github.com/viceroypenguin/RBush>
 - SixLabors.Fonts 1.0.0 — Apache-2.0 — <https://github.com/SixLabors/Fonts>
 - System.IO.Packaging 8.0.1 — MIT — <https://github.com/dotnet/runtime>
+- System.Security.Cryptography.ProtectedData 9.0.0 — MIT — <https://github.com/dotnet/runtime>
 - Microsoft .NET runtime libraries — MIT — <https://github.com/dotnet/runtime>
 
 The packaged SteamKit2 notice is included at `licenses/SteamKit2-LGPL-2.1.txt`. The release is

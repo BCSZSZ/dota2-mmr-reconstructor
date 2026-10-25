@@ -8,8 +8,8 @@
     <AssemblyName>Dota2MmrReconstructor</AssemblyName>
     <RootNamespace>Dota2MmrCollector</RootNamespace>
     <Product>Dota 2 MMR Reconstructor</Product>
-    <Version>0.5.6</Version>
-    <Description>Download authenticated Dota 2 GC history and generate a reconstructed MMR curve.</Description>
+    <Version>0.6.0</Version>
+    <Description>Collect authenticated Dota 2 GC history, reconstruct MMR, and report practice-match player statistics.</Description>
     <RepositoryUrl>https://github.com/BCSZSZ/dota2-mmr-reconstructor</RepositoryUrl>
     <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>

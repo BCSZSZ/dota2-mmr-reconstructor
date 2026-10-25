@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 - 2026-10-25
+
+- Add an independent GUI/CLI practice-match collection task with inclusive local-date input.
+- Request GC Match History with practice matches enabled, retain only `lobby_type = 1`, and fetch
+  full GC match details for the authenticated account's seed matches.
+- Expand one level through OpenDota using the authenticated account and identifiable GC teammates,
+  with Match ID deduplication, retries, source labels and a separate details cache.
+- Generate a two-sheet Excel report for per-player wins/losses plus one symmetric teammate matrix
+  whose cells show shared-match count and win rate (for example `3/66.7%`), including one-match
+  combinations.
+- Allow the GUI to save the OpenDota API key with Windows current-user encryption and reuse it in
+  later GUI or CLI runs without exposing it in logs, caches or reports.
+- Add offline regeneration from `practice-collection.json` and deterministic workbook validation.
+
 ## 0.5.6 - 2026-09-11
 
 - Continue C# reconstruction when a hidden segment's observed endpoint change cannot satisfy the model's win/loss bounds.

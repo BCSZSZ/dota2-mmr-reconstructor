@@ -14,8 +14,8 @@ if (-not (Test-Path -LiteralPath $assemblyPath) -or
 }
 
 $version = (Get-Item -LiteralPath $executablePath).VersionInfo.ProductVersion
-if (-not $version.StartsWith("0.5.6", [System.StringComparison]::Ordinal)) {
-    throw "Expected product version 0.5.6, got $version."
+if (-not $version.StartsWith("0.6.0", [System.StringComparison]::Ordinal)) {
+    throw "Expected product version 0.6.0, got $version."
 }
 
 $helpOutput = (& $executablePath --help | Out-String)
@@ -54,6 +54,66 @@ if ($clearedProperty.GetValue($credentials) -ne $true -or
     throw "Ephemeral credential holder did not release its managed references."
 }
 
+$secretType = $assembly.GetType("Dota2MmrCollector.EphemeralSecret", $true)
+$secretConstructor = $secretType.GetConstructors(
+    [System.Reflection.BindingFlags]"Instance,Public,NonPublic"
+) | Select-Object -First 1
+$secret = $secretConstructor.Invoke(@("temporary-opendota-key"))
+$secretType.GetMethod("Clear").Invoke($secret, @()) | Out-Null
+if ($secretType.GetProperty("IsCleared").GetValue($secret) -ne $true -or
+    $secretType.GetProperty("Value").GetValue($secret) -ne "") {
+    throw "Ephemeral OpenDota key holder did not release its managed reference."
+}
+
+$keyStoreType = $assembly.GetType(
+    "Dota2MmrCollector.PracticeOpenDotaApiKeyStore",
+    $true
+)
+$storeFlags = [System.Reflection.BindingFlags]"Static,NonPublic,Public"
+$keyStoreRoot = [System.IO.Path]::Combine(
+    [System.IO.Path]::GetTempPath(),
+    "dota2-opendota-key-test-$([guid]::NewGuid().ToString('N'))"
+)
+$keyStorePath = Join-Path $keyStoreRoot "opendota-api-key.bin"
+$testKey = "local-opendota-key-$([guid]::NewGuid().ToString('N'))"
+try {
+    $saveArguments = [object[]]::new(2)
+    $saveArguments[0] = [string]$testKey
+    $saveArguments[1] = [string]$keyStorePath
+    $keyStoreType.GetMethod("Save", $storeFlags).Invoke(
+        $null,
+        $saveArguments
+    ) | Out-Null
+    if (-not (Test-Path -LiteralPath $keyStorePath)) {
+        throw "Encrypted OpenDota key store was not created."
+    }
+    $rawKeyStore = [System.IO.File]::ReadAllBytes($keyStorePath)
+    if ([System.Text.Encoding]::UTF8.GetString($rawKeyStore).Contains($testKey)) {
+        throw "OpenDota key store contains the plaintext key."
+    }
+    $pathArgument = [object[]]::new(1)
+    $pathArgument[0] = [string]$keyStorePath
+    $loadedKey = $keyStoreType.GetMethod("TryLoad", $storeFlags).Invoke($null, $pathArgument)
+    if ($loadedKey -ne $testKey) {
+        throw "Encrypted OpenDota key store did not round-trip for the current Windows user."
+    }
+    $keyStoreType.GetMethod("Delete", $storeFlags).Invoke(
+        $null,
+        $pathArgument
+    ) | Out-Null
+    if (Test-Path -LiteralPath $keyStorePath) {
+        throw "Encrypted OpenDota key store was not deleted."
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $keyStorePath) {
+        Remove-Item -LiteralPath $keyStorePath -Force
+    }
+    if (Test-Path -LiteralPath $keyStoreRoot) {
+        Remove-Item -LiteralPath $keyStoreRoot -Force
+    }
+}
+
 $authenticatorType = $assembly.GetType(
     "Dota2MmrCollector.InteractiveSteamAuthenticator",
     $true
@@ -75,5 +135,9 @@ $setupSource = Get-Content -LiteralPath (
 if ($setupSource -notmatch "UseSystemPasswordChar\s*=\s*true") {
     throw "The GUI password field is not masked."
 }
+if ($setupSource -notmatch "saveOpenDotaApiKeyCheck" -or
+    $setupSource -notmatch "Windows 当前用户加密") {
+    throw "The GUI does not expose the encrypted local OpenDota key option."
+}
 
-Write-Output "PASS: v0.5.6 credentials are GUI-only, masked, ephemeral, and force OTP fallback."
+Write-Output "PASS: v0.6.0 Steam credentials remain GUI-only, masked, and ephemeral; OpenDota key storage is Windows-user encrypted."

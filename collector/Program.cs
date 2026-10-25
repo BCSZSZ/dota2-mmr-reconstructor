@@ -25,6 +25,10 @@ internal static class Program
     private static SteamQrWindow? qrWindow;
 
     private static readonly Dictionary<ulong, MatchHistoryGameObservation> matchHistoryById = [];
+    private static readonly Dictionary<ulong, PracticeMatchData> practiceMatchesById = [];
+    private static readonly HashSet<ulong> practiceGcSeedMatchIds = [];
+    private static readonly Queue<ulong> practiceMatchDetailQueue = [];
+    private static readonly List<string> practiceGcErrors = [];
     private static readonly List<CurrentRankObservation> rankUpdates = [];
     private static CurrentRankObservation? currentRank;
     private static CollectorOptions options = default!;
@@ -32,6 +36,12 @@ internal static class Program
     private static uint cachedAccountId;
     private static int cachedHistoryMatchesAtStart;
     private static int matchHistoryPagesRequested;
+    private static int practiceHistoryRowsScanned;
+    private static int practiceMatchDetailsRequested;
+    private static int practiceMatchDetailsSucceeded;
+    private static ulong? pendingPracticeMatchId;
+    private static bool practiceMatchDetailsFinished;
+    private static bool practiceOutputAttempted;
     private static ulong cachedNewestMatchId;
     private static ulong cachedOldestMatchId;
     private static ulong matchHistoryCursor;
@@ -58,8 +68,10 @@ internal static class Program
     private static readonly CancellationTokenSource teammateCancellation = new();
     private static string? teammateStatus;
     private static string? teammateReportPath;
+    private static string? completionOutputDirectory;
     private static DateTime rankRequestedAtUtc;
     private static DateTime historyRequestedAtUtc;
+    private static DateTime practiceMatchDetailRequestedAtUtc;
 
     [STAThread]
     private static int Main(string[] args)
@@ -88,32 +100,78 @@ internal static class Program
         int exitCode;
         try
         {
-            exitCode = options.ExistingCollectionPath is null
-                ? Run()
-                : RunExistingReconstruction();
+            exitCode = options.ExistingPracticeCollectionPath is not null
+                ? RunExistingPracticeReport()
+                : options.ExistingCollectionPath is null
+                    ? Run()
+                    : RunExistingReconstruction();
         }
         finally
         {
             ClearEphemeralCredentials();
+            ClearOpenDotaApiKey();
             ClearLoginToken();
         }
         if (options.Interactive)
         {
             CompletionDialog.Show(
                 exitCode == 0,
-                reconstructionOutput?.OutputDirectory
+                completionOutputDirectory
+                    ?? reconstructionOutput?.OutputDirectory
                     ?? Path.GetDirectoryName(options.OutputPath)
                     ?? options.OutputRoot
                     ?? AppContext.BaseDirectory,
                 reconstructionError,
                 options.GenerateReconstruction
                     && (options.ExistingCollectionPath is not null || options.HistoryMatches > 0),
+                options.Task,
                 teammateStatus,
                 reconstructionOutput?.Notices,
                 teammateReportPath);
         }
 
         return exitCode;
+    }
+
+    private static int RunExistingPracticeReport()
+    {
+        try
+        {
+            var inputPath = Path.GetFullPath(options.ExistingPracticeCollectionPath!);
+            var collection = JsonSerializer.Deserialize<PracticeCollectionOutput>(
+                File.ReadAllText(inputPath),
+                PracticeJson.Options)
+                ?? throw new InvalidDataException("练习比赛 JSON 为空或格式无效。");
+            if (options.ExpectedAccountId is not null
+                && collection.AccountId != options.ExpectedAccountId)
+            {
+                throw new InvalidDataException(
+                    $"练习比赛 JSON 属于账号 {collection.AccountId}，不是请求的账号 " +
+                    $"{options.ExpectedAccountId}。");
+            }
+
+            var outputDirectory = options.OutputRoot is not null
+                ? Path.GetFullPath(options.OutputRoot)
+                : Path.GetDirectoryName(inputPath)!;
+            Directory.CreateDirectory(outputDirectory);
+            var workbookPath = Path.Combine(outputDirectory, "practice-match-report.xlsx");
+            var aggregation = PracticeMatchReportWriter.WriteWorkbook(workbookPath, collection);
+            completionOutputDirectory = outputDirectory;
+            Console.WriteLine(
+                $"练习比赛 Excel 已生成：{aggregation.ScoredMatches:N0} 场计分比赛，" +
+                $"{aggregation.Players.Count:N0} 名玩家，{aggregation.Pairs.Count:N0} 对队友。");
+            Console.WriteLine($"Excel：{workbookPath}");
+            return 0;
+        }
+        catch (Exception exception) when (
+            exception is IOException or JsonException or InvalidDataException
+            or UnauthorizedAccessException or InvalidOperationException
+            or System.Runtime.InteropServices.ExternalException)
+        {
+            reconstructionError = $"练习比赛 Excel 生成失败：{exception.Message}";
+            Console.Error.WriteLine(reconstructionError);
+            return 1;
+        }
     }
 
     private static int RunExistingReconstruction()
@@ -151,14 +209,33 @@ internal static class Program
 
     private static int Run()
     {
-        Console.WriteLine("Dota 2 MMR Reconstructor");
-        Console.WriteLine($"目标历史行数：{options.HistoryMatches:N0}");
+        Console.WriteLine("Dota 2 GC Data Collector / MMR Reconstructor");
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            var practice = options.Practice
+                ?? throw new InvalidOperationException("练习比赛任务缺少日期配置。");
+            Console.WriteLine("任务：练习比赛统计（GC + OpenDota）。");
+            Console.WriteLine(
+                $"日期：{practice.FromDate:yyyy-MM-dd} 至 " +
+                $"{practice.ToDateInclusive:yyyy-MM-dd}（{practice.TimeZoneId}）。");
+        }
+        else
+        {
+            Console.WriteLine($"目标历史行数：{options.HistoryMatches:N0}");
+        }
         Console.WriteLine(options.ResolvePathsAfterLogin
             ? $"输出根目录：{options.OutputRoot}（登录后按账号创建子目录）"
             : $"原始输出：{options.OutputPath}");
-        Console.WriteLine(options.GenerateReconstruction
-            ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/MD/XLSX/SVG/PNG/HTML。"
-            : "下载后：仅保留原始 GC 数据。 ");
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            Console.WriteLine("下载后：生成可审计 JSON 和两张表的 Excel。");
+        }
+        else
+        {
+            Console.WriteLine(options.GenerateReconstruction
+                ? "下载后：使用 C# 生成完整 CSV/JSON/TXT/MD/XLSX/SVG/PNG/HTML。"
+                : "下载后：仅保留原始 GC 数据。 ");
+        }
         Console.WriteLine();
 
         if (Process.GetProcessesByName("dota2").Length > 0)
@@ -169,7 +246,9 @@ internal static class Program
             return 2;
         }
 
-        matchHistoryFinished = options.HistoryMatches == 0;
+        matchHistoryFinished = options.Task == CollectorTaskKind.MmrReconstruction
+            && options.HistoryMatches == 0;
+        practiceMatchDetailsFinished = options.Task == CollectorTaskKind.MmrReconstruction;
         var stateDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Dota2MmrCollector");
@@ -224,10 +303,28 @@ internal static class Program
 
         if (!outputWritten && !suppressOutput && accountId != 0)
         {
-            WriteOutput("connection_ended_before_collection_completed");
+            if (options.Task == CollectorTaskKind.PracticeMatchReport)
+            {
+                matchHistoryError ??= "connection_ended_before_collection_completed";
+                practiceMatchDetailsFinished = true;
+                WritePracticeOutput();
+            }
+            else
+            {
+                WriteOutput("connection_ended_before_collection_completed");
+            }
         }
 
         qrWindow?.Close();
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            return outputWritten
+                && matchHistoryError is null
+                && reconstructionError is null
+                    ? 0
+                    : 1;
+        }
+
         return outputWritten
             && matchHistoryError is null
             && currentRank is not null
@@ -256,16 +353,25 @@ internal static class Program
             }
 
             var placeholderDirectory = Path.Combine(selection.OutputRoot, "_account_pending");
+            var outputFile = selection.Task == CollectorTaskKind.PracticeMatchReport
+                ? "practice-collection.json"
+                : "gc-collection.json";
+            var cacheFile = selection.Task == CollectorTaskKind.PracticeMatchReport
+                ? "practice-match-cache.json"
+                : "gc-match-history-cache.json";
             parsedOptions = new CollectorOptions(
-                Path.Combine(placeholderDirectory, "gc-collection.json"),
+                Path.Combine(placeholderDirectory, outputFile),
                 selection.ExpectedAccountId,
                 selection.HistoryMatches,
-                Path.Combine(placeholderDirectory, "gc-match-history-cache.json"),
+                Path.Combine(placeholderDirectory, cacheFile),
                 true,
                 selection.GenerateReconstruction,
                 selection.OutputRoot,
                 true,
                 null,
+                null,
+                selection.Task,
+                selection.Practice,
                 selection.Login,
                 selection.GenerateTeammates,
                 selection.IncludeNormalMatches);
@@ -285,6 +391,12 @@ internal static class Program
         string? outputRoot = null;
         var resolvePathsAfterLogin = false;
         string? existingCollectionPath = null;
+        string? existingPracticeCollectionPath = null;
+        var task = CollectorTaskKind.MmrReconstruction;
+        DateOnly? practiceFrom = null;
+        DateOnly? practiceTo = null;
+        var practiceTimeZoneId = TimeZoneInfo.Local.Id;
+        var practiceModeRequested = false;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -366,7 +478,8 @@ internal static class Program
                     return false;
                 }
                 outputRoot = Path.GetFullPath(value);
-                resolvePathsAfterLogin = existingCollectionPath is null;
+                resolvePathsAfterLogin = existingCollectionPath is null
+                    && existingPracticeCollectionPath is null;
                 continue;
             }
 
@@ -389,6 +502,83 @@ internal static class Program
                 continue;
             }
 
+            if (argument == "--practice-report")
+            {
+                practiceModeRequested = true;
+                task = CollectorTaskKind.PracticeMatchReport;
+                generateReconstruction = false;
+                continue;
+            }
+
+            if (argument == "--practice-from")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value)
+                    || !DateOnly.TryParseExact(
+                        value,
+                        "yyyy-MM-dd",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out var date))
+                {
+                    Console.Error.WriteLine("--practice-from 需要 YYYY-MM-DD。 ");
+                    parsedOptions = default!;
+                    return false;
+                }
+                practiceFrom = date;
+                practiceModeRequested = true;
+                task = CollectorTaskKind.PracticeMatchReport;
+                generateReconstruction = false;
+                continue;
+            }
+
+            if (argument == "--practice-to")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value)
+                    || !DateOnly.TryParseExact(
+                        value,
+                        "yyyy-MM-dd",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out var date))
+                {
+                    Console.Error.WriteLine("--practice-to 需要 YYYY-MM-DD。 ");
+                    parsedOptions = default!;
+                    return false;
+                }
+                practiceTo = date;
+                practiceModeRequested = true;
+                task = CollectorTaskKind.PracticeMatchReport;
+                generateReconstruction = false;
+                continue;
+            }
+
+            if (argument == "--timezone")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value))
+                {
+                    parsedOptions = default!;
+                    return false;
+                }
+                try
+                {
+                    _ = TimeZoneInfo.FindSystemTimeZoneById(value);
+                    practiceTimeZoneId = value;
+                }
+                catch (TimeZoneNotFoundException)
+                {
+                    Console.Error.WriteLine($"找不到时区：{value}");
+                    parsedOptions = default!;
+                    return false;
+                }
+                catch (InvalidTimeZoneException)
+                {
+                    Console.Error.WriteLine($"时区数据无效：{value}");
+                    parsedOptions = default!;
+                    return false;
+                }
+                continue;
+            }
+
             if (argument == "--reconstruct-existing")
             {
                 if (!TryReadValue(args, ref index, argument, out var value))
@@ -397,7 +587,22 @@ internal static class Program
                     return false;
                 }
                 existingCollectionPath = Path.GetFullPath(value);
+                task = CollectorTaskKind.MmrReconstruction;
                 generateReconstruction = true;
+                resolvePathsAfterLogin = false;
+                continue;
+            }
+
+            if (argument == "--practice-report-existing")
+            {
+                if (!TryReadValue(args, ref index, argument, out var value))
+                {
+                    parsedOptions = default!;
+                    return false;
+                }
+                existingPracticeCollectionPath = Path.GetFullPath(value);
+                task = CollectorTaskKind.PracticeMatchReport;
+                generateReconstruction = false;
                 resolvePathsAfterLogin = false;
                 continue;
             }
@@ -407,12 +612,66 @@ internal static class Program
             return false;
         }
 
+        if (existingCollectionPath is not null && existingPracticeCollectionPath is not null)
+        {
+            Console.Error.WriteLine(
+                "--reconstruct-existing 与 --practice-report-existing 不能同时使用。");
+            parsedOptions = default!;
+            return false;
+        }
+
+        if (existingCollectionPath is not null && practiceModeRequested)
+        {
+            Console.Error.WriteLine(
+                "--reconstruct-existing 不能与练习比赛采集参数同时使用。");
+            parsedOptions = default!;
+            return false;
+        }
+
+        if (task == CollectorTaskKind.PracticeMatchReport
+            && existingPracticeCollectionPath is null)
+        {
+            if (practiceFrom is null || practiceTo is null)
+            {
+                Console.Error.WriteLine(
+                    "--practice-report 需要同时提供 --practice-from 和 --practice-to。");
+                parsedOptions = default!;
+                return false;
+            }
+            if (practiceFrom > practiceTo)
+            {
+                Console.Error.WriteLine("--practice-from 不能晚于 --practice-to。");
+                parsedOptions = default!;
+                return false;
+            }
+
+            if (!explicitOutputPath)
+            {
+                outputPath = Path.GetFullPath(
+                    Path.Combine(defaultDirectory, "practice-collection.json"));
+            }
+            if (!explicitCachePath)
+            {
+                cachePath = Path.GetFullPath(
+                    Path.Combine(defaultDirectory, "practice-match-cache.json"));
+            }
+        }
+
         if (resolvePathsAfterLogin && (explicitOutputPath || explicitCachePath))
         {
             Console.Error.WriteLine("--output-dir 不能与 --output 或 --history-cache 同时使用。");
             parsedOptions = default!;
             return false;
         }
+
+        var practice = task == CollectorTaskKind.PracticeMatchReport
+            && existingPracticeCollectionPath is null
+                ? new PracticeReportSettings(
+                    practiceFrom!.Value,
+                    practiceTo!.Value,
+                    practiceTimeZoneId,
+                    null)
+                : null;
 
         parsedOptions = new CollectorOptions(
             outputPath,
@@ -424,6 +683,9 @@ internal static class Program
             outputRoot,
             resolvePathsAfterLogin,
             existingCollectionPath,
+            existingPracticeCollectionPath,
+            task,
+            practice,
             SteamLoginSelection.QrCode,
             generateTeammates && generateReconstruction,
             includeNormalMatches && generateReconstruction);
@@ -458,14 +720,29 @@ internal static class Program
             "[--output-dir <directory>] [--teammates] [--include-normal-matches]");
         Console.WriteLine("--teammates 生成天梯队友报告；离线重建时只使用缓存，不请求网络。");
         Console.WriteLine("--include-normal-matches 队友报告及详情采集包含常规普通匹配；MMR曲线仍仅含天梯。");
-        Console.WriteLine("双击运行会显示设置窗口；默认下载 5,000 行并生成完整曲线和 HTML。");
+        Console.WriteLine(
+            "Dota2MmrReconstructor --practice-report --practice-from <YYYY-MM-DD> " +
+            "--practice-to <YYYY-MM-DD> [--timezone <Windows time-zone ID>] " +
+            "[--account-id <ID32|SteamID64>] [--output-dir <directory>]");
+        Console.WriteLine(
+            "Dota2MmrReconstructor --practice-report-existing <practice-collection.json> " +
+            "[--output-dir <directory>]");
+        Console.WriteLine("双击运行会显示任务选择；MMR 任务默认下载 5,000 行并生成完整曲线。");
         Console.WriteLine("history-matches 是断点缓存最终保留的目标总行数；重复运行会先复用缓存。");
+        Console.WriteLine(
+            "练习比赛任务只保留 lobby_type=1；OpenDota key 可由 GUI 本机加密保存，" +
+            "也可从 OPENDOTA_API_KEY 或 .env 读取。");
         Console.WriteLine("account-id 同时接受 ID32 和个人账号 SteamID64，也可以在 GUI 中留空自动识别。");
         Console.WriteLine("用户名/密码/Steam Guard 验证码登录仅在 GUI 提供，敏感信息不会放入命令行。");
     }
 
     private static bool LoadMatchHistoryCache()
     {
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            return LoadPracticeMatchCache();
+        }
+
         if (options.HistoryMatches == 0 || !File.Exists(options.HistoryCachePath))
         {
             matchHistoryCaughtUpWithCache = true;
@@ -524,6 +801,52 @@ internal static class Program
         }
     }
 
+    private static bool LoadPracticeMatchCache()
+    {
+        matchHistoryCaughtUpWithCache = true;
+        if (!File.Exists(options.HistoryCachePath))
+        {
+            return true;
+        }
+
+        try
+        {
+            var cache = JsonSerializer.Deserialize<PracticeMatchCache>(
+                File.ReadAllText(options.HistoryCachePath),
+                PracticeJson.Options);
+            if (cache is null || cache.SchemaVersion != 1)
+            {
+                Console.Error.WriteLine($"不支持的练习比赛缓存格式：{options.HistoryCachePath}");
+                return false;
+            }
+            if (cache.AccountId != accountId)
+            {
+                Console.Error.WriteLine(
+                    $"练习比赛缓存属于账号 {cache.AccountId}，登录账号是 {accountId}。");
+                return false;
+            }
+
+            cachedAccountId = cache.AccountId;
+            foreach (var match in cache.Matches)
+            {
+                if (match.MatchId != 0)
+                {
+                    practiceMatchesById[match.MatchId] = match;
+                }
+            }
+            Console.WriteLine(
+                $"已从 {options.HistoryCachePath} 载入 {practiceMatchesById.Count:N0} 场练习比赛详情缓存。");
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(
+                $"无法读取练习比赛缓存 {options.HistoryCachePath}：{exception.GetType().Name}");
+            return false;
+        }
+    }
+
     private static void SaveMatchHistoryCache()
     {
         if (options.HistoryMatches == 0 || accountId == 0)
@@ -538,6 +861,25 @@ internal static class Program
             DateTimeOffset.UtcNow,
             OrderedMatchHistory().ToList());
         WriteJsonAtomically(options.HistoryCachePath, cache);
+    }
+
+    private static void SavePracticeMatchCache()
+    {
+        if (accountId == 0)
+        {
+            return;
+        }
+
+        EnsureParentDirectory(options.HistoryCachePath);
+        var cache = new PracticeMatchCache(
+            1,
+            accountId,
+            DateTimeOffset.UtcNow,
+            practiceMatchesById.Values
+                .OrderByDescending(match => match.StartTimeUnix)
+                .ThenByDescending(match => match.MatchId)
+                .ToArray());
+        WriteJsonAtomically(options.HistoryCachePath, cache, PracticeJson.Options);
     }
 
     private static IEnumerable<MatchHistoryGameObservation> OrderedMatchHistory() =>
@@ -758,17 +1100,41 @@ internal static class Program
         if (options.ResolvePathsAfterLogin)
         {
             var accountDirectory = Path.Combine(options.OutputRoot!, accountId.ToString());
-            options = options with
+            if (options.Task == CollectorTaskKind.PracticeMatchReport)
             {
-                OutputPath = Path.Combine(accountDirectory, "gc-collection.json"),
-                HistoryCachePath = Path.Combine(accountDirectory, "gc-match-history-cache.json"),
-            };
+                var practice = options.Practice
+                    ?? throw new InvalidOperationException("练习比赛任务缺少日期配置。");
+                var reportDirectory = Path.Combine(
+                    accountDirectory,
+                    "practice-reports",
+                    $"{practice.FromDate:yyyy-MM-dd}_{practice.ToDateInclusive:yyyy-MM-dd}");
+                options = options with
+                {
+                    OutputPath = Path.Combine(reportDirectory, "practice-collection.json"),
+                    HistoryCachePath = Path.Combine(
+                        accountDirectory,
+                        "practice-data",
+                        "practice-match-cache.json"),
+                };
+                completionOutputDirectory = reportDirectory;
+            }
+            else
+            {
+                options = options with
+                {
+                    OutputPath = Path.Combine(accountDirectory, "gc-collection.json"),
+                    HistoryCachePath = Path.Combine(accountDirectory, "gc-match-history-cache.json"),
+                };
+            }
         }
 
         if (!cacheLoaded)
         {
             Console.WriteLine($"原始输出：{options.OutputPath}");
-            Console.WriteLine($"断点缓存：{options.HistoryCachePath}");
+            Console.WriteLine(
+                options.Task == CollectorTaskKind.PracticeMatchReport
+                    ? $"练习比赛详情缓存：{options.HistoryCachePath}"
+                    : $"断点缓存：{options.HistoryCachePath}");
             if (!LoadMatchHistoryCache())
             {
                 reconstructionError = "无法载入现有 Match History 缓存。";
@@ -858,7 +1224,14 @@ internal static class Program
                 OnMatchHistory(callback.Message);
                 break;
             case (uint)EDOTAGCMsg.k_EMsgGCMatchDetailsResponse:
-                detailCollector?.OnResponse(callback.Message);
+                if (options.Task == CollectorTaskKind.PracticeMatchReport)
+                {
+                    OnPracticeMatchDetails(callback.Message);
+                }
+                else
+                {
+                    detailCollector?.OnResponse(callback.Message);
+                }
                 break;
         }
     }
@@ -873,7 +1246,14 @@ internal static class Program
         }
 
         gcReady = true;
-        SendRankRequest();
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            rankRequestFinished = true;
+        }
+        else
+        {
+            SendRankRequest();
+        }
         SendMatchHistoryRequest();
     }
 
@@ -945,7 +1325,8 @@ internal static class Program
     private static void SendMatchHistoryRequest()
     {
         if (coordinator is null
-            || options.HistoryMatches == 0
+            || (options.Task == CollectorTaskKind.MmrReconstruction
+                && options.HistoryMatches == 0)
             || matchHistoryFinished
             || matchHistoryRequestPending)
         {
@@ -957,6 +1338,12 @@ internal static class Program
             (uint)EDOTAGCMsg.k_EMsgDOTAGetPlayerMatchHistory);
         request.Body.account_id = accountId;
         request.Body.matches_requested = 20;
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            request.Body.include_practice_matches = true;
+            request.Body.include_custom_games = false;
+            request.Body.include_event_games = false;
+        }
         if (matchHistoryCursor != 0)
         {
             request.Body.start_at_match_id = matchHistoryCursor;
@@ -966,21 +1353,38 @@ internal static class Program
         matchHistoryRequestPending = true;
         matchHistoryPagesRequested++;
         historyRequestedAtUtc = DateTime.UtcNow;
-        Console.WriteLine(
-            $"Match History 第 {matchHistoryPagesRequested} 页 " +
-            $"(cursor={matchHistoryCursor}, cached={matchHistoryById.Count}, " +
-            $"target={options.HistoryMatches})。");
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            Console.WriteLine(
+                $"练习比赛 Match History 第 {matchHistoryPagesRequested} 页 " +
+                $"(cursor={matchHistoryCursor}, seeds={practiceGcSeedMatchIds.Count})。");
+        }
+        else
+        {
+            Console.WriteLine(
+                $"Match History 第 {matchHistoryPagesRequested} 页 " +
+                $"(cursor={matchHistoryCursor}, cached={matchHistoryById.Count}, " +
+                $"target={options.HistoryMatches})。");
+        }
     }
 
     private static void OnMatchHistory(IPacketGCMsg packet)
     {
-        if (!matchHistoryRequestPending || options.HistoryMatches == 0)
+        if (!matchHistoryRequestPending
+            || (options.Task == CollectorTaskKind.MmrReconstruction
+                && options.HistoryMatches == 0))
         {
             return;
         }
 
         var message = new ClientGCMsgProtobuf<CMsgDOTAGetPlayerMatchHistoryResponse>(packet);
         matchHistoryRequestPending = false;
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            OnPracticeMatchHistory(message.Body.matches);
+            return;
+        }
+
         var responseMatches = message.Body.matches;
         var sawCachedNewest = cachedNewestMatchId != 0
             && responseMatches.Any(match =>
@@ -1052,6 +1456,61 @@ internal static class Program
         SendMatchHistoryRequest();
     }
 
+    private static void OnPracticeMatchHistory(
+        IReadOnlyList<CMsgDOTAGetPlayerMatchHistoryResponse.Match> responseMatches)
+    {
+        var practice = options.Practice
+            ?? throw new InvalidOperationException("练习比赛任务缺少日期配置。");
+        practiceHistoryRowsScanned += responseMatches.Count;
+        foreach (var match in responseMatches)
+        {
+            var observation = ObserveMatchHistory(match);
+            if (!observation.MatchId.Present
+                || observation.MatchId.Value == 0
+                || !observation.StartTime.Present
+                || !observation.LobbyType.Present
+                || observation.LobbyType.Value != PracticeMatchNormalizer.PracticeLobbyType
+                || !practice.Contains(observation.StartTime.Value))
+            {
+                continue;
+            }
+
+            matchHistoryById[observation.MatchId.Value] = observation;
+            practiceGcSeedMatchIds.Add(observation.MatchId.Value);
+        }
+
+        if (responseMatches.Count == 0)
+        {
+            CompleteMatchHistory(null);
+            return;
+        }
+
+        var oldestKnownStart = responseMatches
+            .Where(match => match.ShouldSerializestart_time())
+            .Select(match => (long)match.start_time)
+            .DefaultIfEmpty(long.MaxValue)
+            .Min();
+        if (responseMatches.Count < 20
+            || oldestKnownStart < practice.StartUtc.ToUnixTimeSeconds())
+        {
+            CompleteMatchHistory(null);
+            return;
+        }
+
+        var nextCursor = responseMatches
+            .LastOrDefault(match => match.ShouldSerializematch_id() && match.match_id != 0)
+            ?.match_id ?? 0;
+        if (nextCursor == 0 || nextCursor == matchHistoryCursor)
+        {
+            CompleteMatchHistory("pagination_cursor_did_not_advance");
+            return;
+        }
+
+        matchHistoryCursor = nextCursor;
+        Thread.Sleep(TimeSpan.FromSeconds(1));
+        SendMatchHistoryRequest();
+    }
+
     private static MatchHistoryGameObservation ObserveMatchHistory(
         CMsgDOTAGetPlayerMatchHistoryResponse.Match match) => new(
         new HistoryField<ulong>(match.ShouldSerializematch_id(), match.match_id),
@@ -1071,12 +1530,130 @@ internal static class Program
         matchHistoryRequestPending = false;
         matchHistoryFinished = true;
         matchHistoryError = error;
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            Console.WriteLine(
+                $"练习比赛 Match History 完成：扫描 {practiceHistoryRowsScanned:N0} 行，" +
+                $"命中 {practiceGcSeedMatchIds.Count:N0} 场，" +
+                $"本次请求 {matchHistoryPagesRequested:N0} 页" +
+                (error is null ? "。" : $"，错误={error}。"));
+            BeginPracticeMatchDetails();
+            return;
+        }
+
         SaveMatchHistoryCache();
         Console.WriteLine(
             $"Match History 完成：缓存 {matchHistoryById.Count:N0} 行，" +
             $"本次请求 {matchHistoryPagesRequested:N0} 页" +
             (error is null ? "。" : $"，错误={error}。"));
         FinishIfComplete();
+    }
+
+    private static void BeginPracticeMatchDetails()
+    {
+        foreach (var matchId in practiceGcSeedMatchIds.OrderBy(id => id))
+        {
+            if (!practiceMatchesById.ContainsKey(matchId)
+                && matchHistoryById.TryGetValue(matchId, out var history))
+            {
+                practiceMatchesById[matchId] = new PracticeMatchData(
+                    matchId,
+                    history.StartTime.Present ? history.StartTime.Value : 0,
+                    history.LobbyType.Present ? history.LobbyType.Value : 0,
+                    null,
+                    history.Winner.Present
+                        ? history.Winner.Value ? "gc_history_account_win" : "gc_history_account_loss"
+                        : "unknown",
+                    [],
+                    ["GC-History"]);
+            }
+            if (practiceMatchesById.TryGetValue(matchId, out var cached)
+                && cached.HasSource("GC")
+                && cached.HasUsableRoster
+                && cached.WinnerTeam is 2 or 3)
+            {
+                continue;
+            }
+            practiceMatchDetailQueue.Enqueue(matchId);
+        }
+
+        Console.WriteLine(
+            $"GC 种子比赛详情：{practiceGcSeedMatchIds.Count - practiceMatchDetailQueue.Count:N0} 场复用缓存，" +
+            $"{practiceMatchDetailQueue.Count:N0} 场需要请求。");
+        SendNextPracticeMatchDetails();
+    }
+
+    private static void SendNextPracticeMatchDetails()
+    {
+        if (coordinator is null || pendingPracticeMatchId is not null)
+        {
+            return;
+        }
+        if (practiceMatchDetailQueue.Count == 0)
+        {
+            practiceMatchDetailsFinished = true;
+            SavePracticeMatchCache();
+            FinishIfComplete();
+            return;
+        }
+
+        var matchId = practiceMatchDetailQueue.Dequeue();
+        pendingPracticeMatchId = matchId;
+        practiceMatchDetailsRequested++;
+        var request = new ClientGCMsgProtobuf<CMsgGCMatchDetailsRequest>(
+            (uint)EDOTAGCMsg.k_EMsgGCMatchDetailsRequest);
+        request.Body.match_id = matchId;
+        coordinator.Send(request, AppId);
+        practiceMatchDetailRequestedAtUtc = DateTime.UtcNow;
+        Console.WriteLine(
+            $"GC 比赛详情 {practiceMatchDetailsRequested}/" +
+            $"{practiceMatchDetailsRequested + practiceMatchDetailQueue.Count}：{matchId}。");
+    }
+
+    private static void OnPracticeMatchDetails(IPacketGCMsg packet)
+    {
+        if (options.Task != CollectorTaskKind.PracticeMatchReport
+            || pendingPracticeMatchId is not ulong requestedMatchId)
+        {
+            return;
+        }
+
+        var message = new ClientGCMsgProtobuf<CMsgGCMatchDetailsResponse>(packet);
+        var match = message.Body.match;
+        if ((EResult)message.Body.result == EResult.OK && match is not null)
+        {
+            var accountWon = matchHistoryById.TryGetValue(requestedMatchId, out var history)
+                && history.Winner.Present
+                    ? history.Winner.Value
+                    : (bool?)null;
+            var normalized = PracticeMatchNormalizer.FromGc(match, accountId, accountWon);
+            if (normalized.MatchId != 0 && normalized.MatchId != requestedMatchId)
+            {
+                practiceGcErrors.Add(
+                    $"GC 请求比赛 {requestedMatchId}，但详情返回 {normalized.MatchId}；" +
+                    "按请求 Match ID 保存。");
+            }
+            normalized = normalized with { MatchId = requestedMatchId };
+            practiceMatchesById[requestedMatchId] =
+                practiceMatchesById.TryGetValue(requestedMatchId, out var existing)
+                    ? PracticeMatchNormalizer.Merge(existing, normalized)
+                    : normalized;
+            practiceMatchDetailsSucceeded++;
+            if (practiceMatchDetailsSucceeded % 10 == 0)
+            {
+                SavePracticeMatchCache();
+            }
+        }
+        else
+        {
+            practiceGcErrors.Add(
+                $"比赛 {requestedMatchId} 的 GC 详情失败：" +
+                $"{((EResult)message.Body.result)}。");
+        }
+
+        pendingPracticeMatchId = null;
+        Thread.Sleep(TimeSpan.FromMilliseconds(250));
+        SendNextPracticeMatchDetails();
     }
 
     private static void CheckResponseTimeouts()
@@ -1102,12 +1679,34 @@ internal static class Program
         {
             CompleteMatchHistory("response_timeout");
         }
+
+        if (options.Task == CollectorTaskKind.PracticeMatchReport
+            && pendingPracticeMatchId is ulong timedOutMatchId
+            && practiceMatchDetailRequestedAtUtc != default
+            && DateTime.UtcNow - practiceMatchDetailRequestedAtUtc >= ResponseTimeout)
+        {
+            practiceGcErrors.Add($"比赛 {timedOutMatchId} 的 GC 详情请求超时。");
+            pendingPracticeMatchId = null;
+            SendNextPracticeMatchDetails();
+        }
     }
 
     private static void FinishIfComplete()
     {
         if (!rankRequestFinished || !matchHistoryFinished)
         {
+            return;
+        }
+
+        if (options.Task == CollectorTaskKind.PracticeMatchReport)
+        {
+            if (!practiceMatchDetailsFinished)
+            {
+                return;
+            }
+            WritePracticeOutput();
+            disconnectRequested = true;
+            steamClient?.Disconnect();
             return;
         }
 
@@ -1234,6 +1833,117 @@ internal static class Program
         }
     }
 
+    private static void WritePracticeOutput()
+    {
+        if (outputWritten || practiceOutputAttempted || suppressOutput || accountId == 0)
+        {
+            return;
+        }
+        practiceOutputAttempted = true;
+
+        var practice = options.Practice
+            ?? throw new InvalidOperationException("练习比赛任务缺少日期配置。");
+        try
+        {
+            SavePracticeMatchCache();
+            var apiKey = PracticeOpenDotaApiKey.Resolve(practice.OpenDotaApiKey);
+            Console.WriteLine(apiKey is null
+                ? "未找到 OpenDota API key；将使用公开额度补充数据。"
+                : "已载入 OpenDota API key（不会写入日志、缓存或报表输出）。");
+            using var openDota = new PracticeOpenDotaClient(apiKey, Console.WriteLine);
+            var enrichment = openDota.EnrichAsync(
+                    accountId,
+                    practice,
+                    practiceGcSeedMatchIds,
+                    practiceMatchesById)
+                .GetAwaiter()
+                .GetResult();
+            foreach (var pair in enrichment.Matches)
+            {
+                practiceMatchesById[pair.Key] = pair.Value;
+            }
+            SavePracticeMatchCache();
+
+            var relevantMatchIds = enrichment.RelevantMatchIds.ToHashSet();
+            var finalMatches = practiceMatchesById.Values
+                .Where(match =>
+                    relevantMatchIds.Contains(match.MatchId)
+                    &&
+                    match.LobbyType == PracticeMatchNormalizer.PracticeLobbyType
+                    && practice.Contains(match.StartTimeUnix))
+                .OrderBy(match => match.StartTimeUnix)
+                .ThenBy(match => match.MatchId)
+                .ToArray();
+            var gcErrors = matchHistoryError is null
+                ? practiceGcErrors.ToArray()
+                : practiceGcErrors
+                    .Append($"Match History：{matchHistoryError}")
+                    .ToArray();
+            var gcSummary = new PracticeGcCollectionSummary(
+                matchHistoryPagesRequested,
+                practiceHistoryRowsScanned,
+                practiceGcSeedMatchIds.Count,
+                practiceMatchDetailsRequested,
+                practiceMatchDetailsSucceeded,
+                gcErrors);
+            var output = new PracticeCollectionOutput(
+                1,
+                DateTimeOffset.UtcNow,
+                accountId,
+                new PracticePeriodSummary(
+                    practice.FromDate,
+                    practice.ToDateInclusive,
+                    practice.TimeZoneId,
+                    practice.StartUtc,
+                    practice.EndUtcExclusive),
+                gcSummary,
+                enrichment.Summary,
+                enrichment.KnownTeammateAccountIds,
+                finalMatches,
+                [
+                    "Only lobby_type=1 (practice/self-hosted lobby) is included.",
+                    "The OpenDota expansion queries the authenticated account plus the identifiable teammates found on the authenticated account's GC seed matches. It does not recursively expand newly discovered players.",
+                    "Matches are deduplicated by match_id. GC and OpenDota sources are retained on each normalized match.",
+                    "Unscored/cancelled matches are kept in JSON but excluded from wins, losses and teammate win-rate denominators.",
+                    "Anonymous players are keyed by match_id and player_slot, so they are never merged across matches.",
+                    "Steam credentials and tokens are never written to disk. An OpenDota API key may be saved only in the optional Windows current-user encrypted store; it is never written to logs, caches, or report outputs.",
+                ]);
+
+            EnsureParentDirectory(options.OutputPath);
+            WriteJsonAtomically(options.OutputPath, output, PracticeJson.Options);
+            var outputDirectory = Path.GetDirectoryName(options.OutputPath)
+                ?? throw new InvalidOperationException("练习比赛输出路径没有父目录。");
+            var workbookPath = Path.Combine(outputDirectory, "practice-match-report.xlsx");
+            var aggregation = PracticeMatchReportWriter.WriteWorkbook(workbookPath, output);
+            completionOutputDirectory = outputDirectory;
+            outputWritten = true;
+            Console.WriteLine($"练习比赛原始数据已写入 {options.OutputPath}");
+            Console.WriteLine($"练习比赛 Excel 已写入 {workbookPath}");
+            Console.WriteLine(
+                $"最终统计：{aggregation.ScoredMatches:N0} 场计分比赛，" +
+                $"{aggregation.Players.Count:N0} 名玩家，{aggregation.Pairs.Count:N0} 对队友。");
+            if (!enrichment.Summary.Complete)
+            {
+                Console.Error.WriteLine(
+                    $"OpenDota 补充有 {enrichment.Summary.Errors.Count:N0} 项失败；" +
+                    "已在 practice-collection.json 中记录，Excel 为成功取得的数据集合。");
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or JsonException or InvalidDataException
+            or UnauthorizedAccessException or InvalidOperationException
+            or HttpRequestException or TaskCanceledException
+            or System.Runtime.InteropServices.ExternalException)
+        {
+            reconstructionError = $"练习比赛报表生成失败：{exception.Message}";
+            Console.Error.WriteLine(reconstructionError);
+        }
+        finally
+        {
+            ClearOpenDotaApiKey();
+        }
+    }
+
     private static void WriteOutput(string? completionError)
     {
         if (outputWritten || suppressOutput || accountId == 0)
@@ -1314,16 +2024,21 @@ internal static class Program
         }
     }
 
-    private static void WriteJsonAtomically<T>(string path, T value)
+    private static void WriteJsonAtomically<T>(
+        string path,
+        T value,
+        JsonSerializerOptions? serializerOptions = null)
     {
         var temporaryPath = path + ".tmp";
         File.WriteAllText(
             temporaryPath,
-            JsonSerializer.Serialize(value, new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-            }));
+            JsonSerializer.Serialize(
+                value,
+                serializerOptions ?? new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+                }));
         File.Move(temporaryPath, path, overwrite: true);
     }
 
@@ -1335,6 +2050,9 @@ internal static class Program
 
     private static void ClearEphemeralCredentials() =>
         options.Login?.Credentials?.Clear();
+
+    private static void ClearOpenDotaApiKey() =>
+        options.Practice?.OpenDotaApiKey?.Clear();
 
     private static FieldObservation Observe(bool present, object value) =>
         new(present, value);
@@ -1350,6 +2068,9 @@ internal sealed record CollectorOptions(
     string? OutputRoot,
     bool ResolvePathsAfterLogin,
     string? ExistingCollectionPath,
+    string? ExistingPracticeCollectionPath,
+    CollectorTaskKind Task,
+    PracticeReportSettings? Practice,
     SteamLoginSelection Login,
     bool GenerateTeammates = false,
     bool IncludeNormalMatches = false);

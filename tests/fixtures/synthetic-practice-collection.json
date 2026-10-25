@@ -1,0 +1,102 @@
+{
+  "SchemaVersion": 1,
+  "GeneratedAtUtc": "2026-02-01T00:00:00+00:00",
+  "AccountId": 136619313,
+  "Period": {
+    "FromDate": "2026-01-01",
+    "ToDateInclusive": "2026-01-31",
+    "TimeZoneId": "Tokyo Standard Time",
+    "StartUtc": "2025-12-31T15:00:00+00:00",
+    "EndUtcExclusive": "2026-01-31T15:00:00+00:00"
+  },
+  "Gc": {
+    "HistoryPagesRequested": 2,
+    "HistoryRowsScanned": 40,
+    "SeedMatches": 3,
+    "MatchDetailsRequested": 3,
+    "MatchDetailsSucceeded": 3,
+    "Errors": []
+  },
+  "OpenDota": {
+    "ApiKeyUsed": true,
+    "Complete": true,
+    "AccountsQueried": 3,
+    "CandidateMatches": 5,
+    "MatchDetailsRequested": 1,
+    "MatchesAdded": 1,
+    "Errors": []
+  },
+  "KnownTeammateAccountIds": [111, 222],
+  "Matches": [
+    {
+      "MatchId": 100,
+      "StartTimeUnix": 1767621600,
+      "LobbyType": 1,
+      "WinnerTeam": 2,
+      "Outcome": "k_EMatchOutcome_RadVictory",
+      "Players": [
+        { "AccountId": 136619313, "Name": "本人", "Team": 2, "PlayerSlot": 0, "HeroId": 1, "IsBot": false },
+        { "AccountId": 111, "Name": "Alice", "Team": 2, "PlayerSlot": 1, "HeroId": 2, "IsBot": false },
+        { "AccountId": 222, "Name": "Bob", "Team": 2, "PlayerSlot": 2, "HeroId": 3, "IsBot": false },
+        { "AccountId": null, "Name": null, "Team": 2, "PlayerSlot": 3, "HeroId": 4, "IsBot": false },
+        { "AccountId": null, "Name": "Bot", "Team": 2, "PlayerSlot": 4, "HeroId": 5, "IsBot": true },
+        { "AccountId": 333, "Name": "Carol", "Team": 3, "PlayerSlot": 128, "HeroId": 6, "IsBot": false },
+        { "AccountId": 444, "Name": "Dave", "Team": 3, "PlayerSlot": 129, "HeroId": 7, "IsBot": false },
+        { "AccountId": 555, "Name": "Eve", "Team": 3, "PlayerSlot": 130, "HeroId": 8, "IsBot": false }
+      ],
+      "Sources": ["GC", "OpenDota"]
+    },
+    {
+      "MatchId": 101,
+      "StartTimeUnix": 1768053600,
+      "LobbyType": 1,
+      "WinnerTeam": 3,
+      "Outcome": "dire_win",
+      "Players": [
+        { "AccountId": 111, "Name": "Alice", "Team": 2, "PlayerSlot": 0, "HeroId": 9, "IsBot": false },
+        { "AccountId": 333, "Name": "Carol", "Team": 2, "PlayerSlot": 1, "HeroId": 10, "IsBot": false },
+        { "AccountId": 666, "Name": "Frank", "Team": 3, "PlayerSlot": 128, "HeroId": 11, "IsBot": false },
+        { "AccountId": 777, "Name": "Dana", "Team": 3, "PlayerSlot": 129, "HeroId": 12, "IsBot": false }
+      ],
+      "Sources": ["OpenDota"]
+    },
+    {
+      "MatchId": 102,
+      "StartTimeUnix": 1768485600,
+      "LobbyType": 1,
+      "WinnerTeam": 3,
+      "Outcome": "k_EMatchOutcome_DireVictory",
+      "Players": [
+        { "AccountId": 333, "Name": "Carol", "Team": 2, "PlayerSlot": 0, "HeroId": 13, "IsBot": false },
+        { "AccountId": 666, "Name": "Frank", "Team": 2, "PlayerSlot": 1, "HeroId": 14, "IsBot": false },
+        { "AccountId": 136619313, "Name": "本人", "Team": 3, "PlayerSlot": 128, "HeroId": 15, "IsBot": false },
+        { "AccountId": 111, "Name": "Alice", "Team": 3, "PlayerSlot": 129, "HeroId": 16, "IsBot": false }
+      ],
+      "Sources": ["GC"]
+    },
+    {
+      "MatchId": 103,
+      "StartTimeUnix": 1768917600,
+      "LobbyType": 1,
+      "WinnerTeam": null,
+      "Outcome": "k_EMatchOutcome_NotScored_Canceled",
+      "Players": [
+        { "AccountId": 136619313, "Name": "本人", "Team": 2, "PlayerSlot": 0, "HeroId": 17, "IsBot": false },
+        { "AccountId": 111, "Name": "Alice", "Team": 2, "PlayerSlot": 1, "HeroId": 18, "IsBot": false }
+      ],
+      "Sources": ["GC"]
+    },
+    {
+      "MatchId": 104,
+      "StartTimeUnix": 1769954400,
+      "LobbyType": 1,
+      "WinnerTeam": 2,
+      "Outcome": "radiant_win",
+      "Players": [
+        { "AccountId": 136619313, "Name": "本人", "Team": 2, "PlayerSlot": 0, "HeroId": 19, "IsBot": false }
+      ],
+      "Sources": ["OpenDota"]
+    }
+  ],
+  "Notes": ["Synthetic fixture for deterministic workbook verification."]
+}

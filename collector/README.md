@@ -1,8 +1,8 @@
 # Dota 2 MMR Reconstructor for Windows
 
 `Dota2MmrReconstructor.exe` 通过 Steam QR，或一次性用户名/密码与 Steam Guard 验证码
-登录本人账号，下载原始 Dota 2 GC Match History 与 Current Rank，并用内置 C# 模型生成
-完整 MMR 曲线和独立 HTML。
+登录本人账号。GUI 可选择两项互不影响的任务：下载 GC 天梯数据并生成完整 MMR 曲线，或
+按日期采集 `lobby_type = 1` 的练习比赛、用 OpenDota 补充已知队友的比赛并生成 Excel。
 
 v0.5.6 对无法满足端点约束的隐藏区间继续生成报告：逐场分差留空，曲线以断线和真实锚点表示。
 CSV/JSON 保留这些比赛；英雄和队友统计排除这些场次并注明覆盖缺口。GC 请求策略保持原样。
@@ -11,11 +11,15 @@ CSV/JSON 保留这些比赛；英雄和队友统计排除这些场次并注明�
 
 1. 完全退出 Dota 2；
 2. 双击 EXE；
-3. 在设置窗口输入目标场数、可选 Steam ID 和输出目录；
+3. 在设置窗口选择任务，并填写目标场数或练习比赛首尾日期、可选 Steam ID 和输出目录；
 4. 使用默认二维码登录；如果手机没有扫码功能，可选择用户名/密码模式，并在程序随后弹出的
    窗口输入当前五位 Steam Guard 验证码；
-5. 完成后点击“打开队友报告”查看队友榜单，或点击“打开 MMR 曲线”查看分数变化。
-   “打开输出文件夹”可查看 PNG、TXT、Markdown、Excel 等文件。
+5. MMR 任务完成后可点击“打开队友报告”或“打开 MMR 曲线”；练习比赛任务可查看
+   `practice-match-report.xlsx`。“打开输出文件夹”可查看全部 HTML、PNG、Excel 和 JSON。
+
+练习比赛任务首次运行时可把 OpenDota API key 粘贴到遮挡输入框，并保持“保存到本机”勾选。
+程序用 Windows 当前用户加密保存在本机，以后 GUI 和命令行都会自动使用；取消勾选会删除
+已保存的 key，本次输入仍会使用。也可继续使用 `OPENDOTA_API_KEY` 或 EXE 同目录 `.env`。
 
 Steam ID 可以留空自动识别，也可填写 ID32 或 SteamID64 防止扫错账号。默认扫描
 5,000 条 GC 历史，建议单次目标不超过 10,000。GC 请求不能在服务端只筛天梯，因此目标数
@@ -58,6 +62,25 @@ Steam ID 可以留空自动识别，也可填写 ID32 或 SteamID64 防止扫错
   --reconstruct-existing .\artifacts\123456789\gc-collection.json `
   --output-dir .\artifacts\123456789\mmr-reconstruction
 ```
+
+练习比赛任务的命令行示例（API key 也可放在 EXE 同目录 `.env`）：
+
+```powershell
+$env:OPENDOTA_API_KEY = "你的 key"
+.\Dota2MmrReconstructor.exe `
+  --practice-report `
+  --practice-from 2026-09-01 `
+  --practice-to 2026-09-30 `
+  --timezone "Tokyo Standard Time" `
+  --account-id 136619313 `
+  --output-dir .\artifacts
+```
+
+它先从本人 GC 比赛识别指定日期内的种子比赛和同队账号，再查询“本人 + 已知队友”的
+OpenDota 练习比赛。新比赛中出现的其他玩家不会继续递归扩展。Match ID 会去重，GC 和
+OpenDota 使用独立的练习比赛缓存；匿名账号不会跨比赛合并。Excel 只有“玩家统计”和
+“组队胜率”两张表；第二张表是对称矩阵，每个交叉格显示 `共同场数/胜率`（例如
+`3/66.7%`），并包含仅共同出场 1 场的组合。
 
 使用 `--raw-only` 可以只下载原始 JSON。原始文件与缓存永远独立保存，拟合只写入
 `mmr-reconstruction` 子目录。

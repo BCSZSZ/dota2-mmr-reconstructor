@@ -1,16 +1,18 @@
 # Dota 2 MMR Reconstructor
 
-从本人 Steam/Dota 2 Game Coordinator 下载天梯历史，并重建 Rank Confidence 低于
-30% 时被 GC 隐藏的逐局 MMR 曲线。
+从本人 Steam/Dota 2 Game Coordinator 下载数据：既可重建 Rank Confidence 低于 30% 时
+被 GC 隐藏的逐局 MMR 曲线，也可按时间统计练习比赛的玩家胜负与组队胜率。
 
-Windows 普通用户只需要运行 `Dota2MmrReconstructor.exe`。它会依次完成：
+Windows 普通用户只需要运行 `Dota2MmrReconstructor.exe`。它支持 MMR 曲线和练习比赛统计
+两个相互独立的采集任务：
 
-1. 在 GUI 中选择目标场数、可选 Steam ID 和输出目录；
+1. 在 GUI 中选择采集任务、可选 Steam ID 和输出目录；
 2. 通过 Steam 二维码，或一次性用户名/密码与 Steam Guard 验证码登录；
-   随后下载 Match History 与 Current Rank；
+   MMR 任务下载天梯 Match History 与 Current Rank；练习比赛任务只启用 GC 的
+   `include_practice_matches` 并严格保留 `lobby_type = 1`；
 3. 保留不可变的原始 GC JSON 和断点缓存；
-4. 使用内置 C# 模型生成 CSV、JSON、TXT、Markdown、XLSX、SVG、PNG 和独立 HTML；
-5. 用户直接双击 `mmr-history.html`，即可缩放、拖动和筛选曲线。
+4. MMR 任务生成曲线文件；练习比赛任务通过 OpenDota 补充已知队友在同一日期范围内的
+   练习比赛，并生成玩家胜负与队友组合胜率 Excel。
 
 不需要安装 Python、uv、Node.js，也不需要安装浏览器插件。Python 版本继续保留为模型的
 参考实现和研究工具。
@@ -46,6 +48,26 @@ framework-dependent 方式，因此必须保留 ZIP 中的 DLL，不能只复制
 - `生成拟合结果与可交互 HTML`：默认启用。
 - `队友报告包含普通匹配`：默认关闭；开启后，队友详情提取及报告合并天梯与常规普通匹配。
   MMR曲线和上分／下分仍仅用天梯。队友HTML可从分数图框选时间，结合普通匹配开关与最低局数重算八张Top 10图。
+
+选择 `练习比赛统计（GC + OpenDota）` 后，改为填写首尾日期。两个日期都包含在统计范围内，
+时区使用运行程序的 Windows 本机时区。首次运行时把 OpenDota API key 粘贴到遮挡输入框，
+保持“保存到本机”勾选即可；程序会使用 Windows 当前用户加密并在以后自动载入。取消勾选
+会删除本机保存的 key，本次输入仍可使用。也可留空并通过 `OPENDOTA_API_KEY` 环境变量或
+EXE 同目录的 `.env` 提供。key 不写入日志、比赛缓存或报表输出。
+
+练习比赛任务按以下顺序工作：
+
+1. 从本人 GC Match History 取得指定日期内 `lobby_type = 1` 的种子比赛；
+2. 从 GC Match Details 读取完整阵容，识别这些种子比赛中与本人同队的账号；
+3. 向 OpenDota 查询“本人 + 上一步已知队友”在同一日期范围内的练习比赛；
+4. 对新 Match ID 获取完整详情并去重。不会递归扩展 OpenDota 新比赛里刚出现的其他玩家；
+5. 生成 `practice-collection.json` 和含“玩家统计”“组队胜率”两张表的
+   `practice-match-report.xlsx`。第二张表以对称二维矩阵显示组队数据，每个交叉格采用
+   `共同场数/胜率`（例如 `3/66.7%`），并包含仅共同出场 1 场的组合。
+
+OpenDota 只能补充它已经收录且公开可访问的数据。匿名账号按“Match ID + 玩家槽位”分别
+列示，不会跨比赛误合并；机器人、教练、观战槽位及没有明确胜负的取消/未计分比赛不进入
+胜负和组队胜率分母。
 
 点击“开始”前必须完全退出 Dota 2。二维码会在独立窗口中显示和自动刷新。凭据登录模式会
 在 Steam 真正需要二次验证时另行弹出验证码窗口，避免预先填写的 30 秒 OTP 过期；验证码
@@ -98,6 +120,11 @@ GUI 中应选择 `E:\Dota2MmrData`，而不是选择 `E:\Dota2MmrData\123456789`
 <输出根目录>/<ID32>/
 ├── gc-collection.json                 # 原始 GC 快照，模型不会覆盖
 ├── gc-match-history-cache.json        # 可断点续传的原始历史缓存
+├── practice-data/
+│   └── practice-match-cache.json       # GC/OpenDota 练习比赛详情缓存
+├── practice-reports/<开始日期_结束日期>/
+│   ├── practice-collection.json        # 标准化比赛、来源和补充诊断
+│   └── practice-match-report.xlsx      # 玩家胜负与“共同场数/胜率”组队矩阵
 ├── reconstruction-manifest.json
 └── mmr-reconstruction/
     ├── model-summary.json
@@ -156,6 +183,28 @@ GUI 不是必须的。自动化或高级用户可以运行：
   --account-id 123456789
 ```
 
+采集练习比赛并补充 OpenDota 数据：
+
+```powershell
+$env:OPENDOTA_API_KEY = "你的 key"
+.\Dota2MmrReconstructor.exe `
+  --practice-report `
+  --practice-from 2026-09-01 `
+  --practice-to 2026-09-30 `
+  --timezone "Tokyo Standard Time" `
+  --account-id 136619313 `
+  --output-dir .\artifacts
+```
+
+命令行的首尾日期同样都包含在范围内。省略 `--timezone` 时使用 Windows 本机时区。已有
+`practice-collection.json` 可以在不连接 Steam/OpenDota 的情况下重新生成 Excel：
+
+```powershell
+.\Dota2MmrReconstructor.exe `
+  --practice-report-existing .\practice-collection.json `
+  --output-dir .\practice-report
+```
+
 用户名/密码/Steam Guard 验证码登录故意只在 GUI 提供。程序不接受 `--password`、`--otp`
 之类的参数，避免密码进入命令历史、进程列表或自动化日志。
 
@@ -200,6 +249,7 @@ uv run ruff check .
 dotnet build .\collector\Dota2MmrCollector.csproj -c Release
 .\scripts\test_credential_login_security.ps1
 .\scripts\test_csharp_reconstruction.ps1
+.\scripts\test_practice_match_report.ps1
 ```
 
 ## 隐私与安全
@@ -207,6 +257,10 @@ dotnet build .\collector\Dota2MmrCollector.csproj -c Release
 - `.env`、`artifacts/`、`outputs/`、缓存和构建目录默认不会进入 Git；
 - 二维码登录不接触账号密码；凭据登录仅为无法扫码的兼容选项；
 - 用户名、密码、OTP、邮箱 Guard 数据和 Steam refresh token 都不写入磁盘或日志；
+- OpenDota API key 可选择保存到
+  `%LOCALAPPDATA%\Dota2MmrReconstructor\opendota-api-key.bin`；内容由 Windows DPAPI 按当前
+  用户加密，不能直接移到另一台电脑或另一个 Windows 用户使用；key 不进入日志、比赛缓存
+  或报表；
 - 密码框遮挡输入，凭据没有命令行参数；SteamKit 使用 Steam 提供的 RSA 公钥加密密码后发送；
 - 登录完成、失败或程序正常退出时，会清空程序持有的凭据引用；但 .NET 字符串不可原地可靠
   擦除，因此无法承诺它们绝不会短暂残留在托管内存、交换文件或系统崩溃转储中；在不信任的
