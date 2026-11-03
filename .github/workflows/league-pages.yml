@@ -1,4 +1,4 @@
-name: Refresh and deploy league dashboard
+name: Deploy league dashboard redirect
 
 on:
   push:
@@ -6,17 +6,11 @@ on:
       - main
     paths:
       - ".github/workflows/league-pages.yml"
-      - "site/**"
-      - "src/dota2_mmr/league_site.py"
-      - "pyproject.toml"
-      - "uv.lock"
-  schedule:
-    # 10:00 JST every day (GitHub cron is UTC).
-    - cron: "0 1 * * *"
+      - "site/index.html"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -30,43 +24,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
-        with:
-          enable-cache: true
-
-      - name: Install locked dependencies
-        run: uv sync --frozen
-
-      - name: Refresh OpenDota league data
-        env:
-          OPENDOTA_API_KEY: ${{ secrets.OPENDOTA_API_KEY }}
-          OPENDOTA_MAX_PAID_CALLS: "250"
-        run: >-
-          uv run python -m dota2_mmr.league_site
-          --league-id 19224
-          --output site/data/league.json
-          --refresh-recent 5
-
-      - name: Persist refreshed data
-        run: |
-          if git diff --quiet -- site/data/league.json; then
-            echo "League data is unchanged."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/data/league.json
-          git commit -m "Refresh league dashboard data"
-          git push
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
