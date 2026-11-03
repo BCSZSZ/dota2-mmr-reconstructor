@@ -2,7 +2,6 @@ const JST_OFFSET = "+09:00";
 const DAY_SECONDS = 86_400;
 
 const elements = {
-  leagueName: document.querySelector("#leagueName"),
   heroStatus: document.querySelector("#heroStatus"),
   updateStamp: document.querySelector("#updateStamp"),
   fromDate: document.querySelector("#fromDate"),
@@ -347,7 +346,6 @@ async function load() {
       input.max = toDateInput(state.maximum);
     }
 
-    elements.leagueName.textContent = data.league?.name || `联赛 ${data.league_id}`;
     elements.heroStatus.textContent = `${data.matches.length} 场战报已入册 · 联赛 ${data.league_id}`;
     elements.updateStamp.textContent = `数据更新时间：${formatJst(Date.parse(data.generated_at_utc) / 1000)} JST`;
     elements.minimumTime.textContent = formatShortJst(state.minimum);
