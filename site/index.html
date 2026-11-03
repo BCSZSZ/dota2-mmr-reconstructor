@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#970018" />
+    <meta
+      name="description"
+      content="科大光荣班 Dota 2 内战战绩：按时间筛选玩家胜负与组队胜率。"
+    />
+    <title>科大光荣班 · Dota 2 内战荣誉榜</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" type="module"></script>
+  </head>
+  <body>
+    <div class="fireworks" aria-hidden="true"></div>
+
+    <header class="hero">
+      <div class="hero-pattern" aria-hidden="true"></div>
+      <div class="lantern lantern-left" aria-hidden="true">
+        <span class="lantern-cap"></span><span class="lantern-body">胜</span><span class="tassel"></span>
+      </div>
+      <div class="lantern lantern-right" aria-hidden="true">
+        <span class="lantern-cap"></span><span class="lantern-body">福</span><span class="tassel"></span>
+      </div>
+
+      <div class="hero-copy">
+        <div class="hero-kicker"><span>✦</span> 内战有喜 · 荣耀登榜 <span>✦</span></div>
+        <h1 class="hero-title" data-text="科大光荣班" aria-label="科大光荣班">科大光荣班</h1>
+        <p class="hero-subtitle"><span id="leagueName">干嘛，要加班</span> · Dota 2 内战荣誉榜</p>
+        <div class="hero-seals" aria-label="数据状态">
+          <span class="seal">战</span>
+          <span class="hero-status" id="heroStatus">正在迎接战报……</span>
+          <span class="seal">荣</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="panel filter-panel" aria-labelledby="rangeTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">择良辰 · 看战绩</p>
+            <h2 id="rangeTitle">选择统计时间</h2>
+          </div>
+          <div class="update-stamp" id="updateStamp">数据更新时间：读取中</div>
+        </div>
+
+        <div class="quick-ranges" aria-label="快捷时间范围">
+          <button type="button" data-days="3">过去三天</button>
+          <button type="button" data-days="7">过去一周</button>
+          <button type="button" data-days="30">过去一个月</button>
+          <button type="button" data-range="all" class="active">全部战绩</button>
+        </div>
+
+        <div class="date-fields">
+          <label>
+            <span>开始时间（JST）</span>
+            <input id="fromDate" type="datetime-local" step="60" />
+          </label>
+          <div class="date-divider" aria-hidden="true">至</div>
+          <label>
+            <span>结束时间（JST）</span>
+            <input id="toDate" type="datetime-local" step="60" />
+          </label>
+        </div>
+
+        <div class="timeline-wrap">
+          <div class="timeline" id="timeline">
+            <div class="timeline-base"></div>
+            <div class="timeline-selection" id="timelineSelection"></div>
+            <input id="fromRange" type="range" aria-label="开始时间滑块" />
+            <input id="toRange" type="range" aria-label="结束时间滑块" />
+          </div>
+          <div class="timeline-labels">
+            <span id="minimumTime">—</span>
+            <strong id="selectedTime">—</strong>
+            <span id="maximumTime">—</span>
+          </div>
+        </div>
+        <p class="range-note">快捷选择以数据中的最新比赛为终点；拖动双滑块或直接输入时间都可以。</p>
+      </section>
+
+      <section class="summary-grid" aria-label="所选范围概览">
+        <article class="summary-card card-matches">
+          <span class="card-mark">局</span>
+          <p>所选比赛</p>
+          <strong id="matchCount">0</strong>
+          <small>场</small>
+        </article>
+        <article class="summary-card card-players">
+          <span class="card-mark">将</span>
+          <p>出场玩家</p>
+          <strong id="playerCount">0</strong>
+          <small>人</small>
+        </article>
+        <article class="summary-card card-range">
+          <span class="card-mark">时</span>
+          <p>当前范围</p>
+          <strong id="rangeDays">0</strong>
+          <small>天</small>
+        </article>
+        <article class="summary-card card-source">
+          <span class="card-mark">新</span>
+          <p>公开数据</p>
+          <strong id="availableCount">0</strong>
+          <small>场已收录</small>
+        </article>
+      </section>
+
+      <div class="notice" id="coverageNotice" hidden></div>
+
+      <section class="panel stats-panel" aria-labelledby="statsTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">论功行赏</p>
+            <h2 id="statsTitle">玩家统计</h2>
+          </div>
+          <p class="panel-caption">按总场数、胜场排序</p>
+        </div>
+        <div class="table-scroll">
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th>排名</th>
+                <th>玩家</th>
+                <th>Account ID</th>
+                <th>胜</th>
+                <th>负</th>
+                <th>总场数</th>
+                <th>胜率</th>
+              </tr>
+            </thead>
+            <tbody id="statsBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="statsEmpty" hidden>
+          <span>空</span>
+          <p>这个时间段没有比赛，换一个范围再看看。</p>
+        </div>
+      </section>
+
+      <section class="panel matrix-panel" aria-labelledby="matrixTitle">
+        <div class="panel-heading matrix-heading">
+          <div>
+            <p class="eyebrow">并肩作战</p>
+            <h2 id="matrixTitle">组队胜率矩阵</h2>
+          </div>
+          <div class="legend" aria-label="胜率颜色说明">
+            <span><i class="legend-loss"></i>低于 40%</span>
+            <span><i class="legend-even"></i>40%–59.9%</span>
+            <span><i class="legend-win"></i>60% 以上</span>
+          </div>
+        </div>
+        <p class="matrix-note">格子显示“共同场数/胜率”，例如 3/66.7%。空白代表没有同队出场。</p>
+        <div class="matrix-scroll" id="matrixScroll">
+          <table class="matrix-table" id="matrixTable"></table>
+        </div>
+        <div class="empty-state" id="matrixEmpty" hidden>
+          <span>静</span>
+          <p>当前范围还没有可组成矩阵的玩家。</p>
+        </div>
+      </section>
+
+      <section class="source-strip" aria-label="数据说明">
+        <div class="source-icon">源</div>
+        <div>
+          <strong>数据来自 OpenDota 公开接口</strong>
+          <p>
+            每天 JST 10:00 自动刷新联赛 19224。只统计能公开识别 Account ID 且有胜负结果的选手位；比赛隐私设置可能造成匿名或缺失。
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span aria-hidden="true">❖</span>
+      <p>科大光荣班 · 胜负皆尽兴，开黑常有喜</p>
+      <span aria-hidden="true">❖</span>
+    </footer>
+  </body>
+</html>
